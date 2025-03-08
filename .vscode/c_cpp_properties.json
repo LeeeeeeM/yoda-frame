@@ -6,7 +6,9 @@
                 "${workspaceFolder}/**",
                 "${workspaceFolder}/yoga/yoga/**",
                 "/opt/homebrew/include/**",
-                "/usr/local/include/**"
+                "/usr/local/include/**",
+                "/opt/homebrew/include/glib-2.0",
+                "/opt/homebrew/lib/glib-2.0/include"
             ],
             "defines": [],
             "macFrameworkPath": [],

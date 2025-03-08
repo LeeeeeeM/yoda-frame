@@ -28,8 +28,19 @@ find_library(SDL2_LIBRARY
   PATHS /usr/lib /usr/local/lib /opt/homebrew/lib
 )
 
-include_directories(${YOGA_INCLUDE_DIR} ${SDL2_INCLUDE_DIR})
+set(GLIB_LIB_PATH "/opt/homebrew/lib")
+set(GLIB_INCLUDE_PATH "/opt/homebrew/include/glib-2.0")
+set(GLIB_INCLUDE_EXTRA "/opt/homebrew/lib/glib-2.0/include")  # 这个路径经常被忽略！
+
+# 手动指定库和头文件
+find_library(GLIB_LIBRARY
+    NAMES glib-2.0
+    PATHS ${GLIB_LIB_PATH}
+    NO_DEFAULT_PATH
+)
+
+include_directories(${YOGA_INCLUDE_DIR} ${SDL2_INCLUDE_DIR} ${GLIB_INCLUDE_PATH} ${GLIB_INCLUDE_EXTRA})
 
 add_executable(main main.c)
 
-target_link_libraries(main ${YOGA_LIBRARY} ${SDL2_LIBRARY})
+target_link_libraries(main ${YOGA_LIBRARY} ${SDL2_LIBRARY} ${GLIB_LIBRARY})

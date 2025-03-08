@@ -1,4 +1,5 @@
 #include <SDL2/SDL.h>
+#include <glib.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -47,6 +48,7 @@ typedef struct TreeNode {
 /*-------------------------------------
  * 全局状态
  *-----------------------------------*/
+GHashTable *nodeIdMap = NULL;
 TreeNode *selectedNode = NULL;
 YGNodeRef yogaRoot = NULL;
 TreeNode *root_data = NULL;
@@ -79,6 +81,7 @@ TreeNode *create_node(float flex, float margin, YGFlexDirection flexDirection,
                       YGJustify justifyContent) {
   TreeNode *node = (TreeNode *)malloc(sizeof(TreeNode));
   node->id = nextNodeId++;
+  g_hash_table_insert(nodeIdMap, &node->id, node);
 
   node->style = (NodeStyle *)malloc(sizeof(NodeStyle));
   node->style->flex = flex;
@@ -98,12 +101,15 @@ TreeNode *create_node(float flex, float margin, YGFlexDirection flexDirection,
 }
 
 void free_tree(TreeNode *node) {
-  for (int i = 0; i < node->childCount; i++) {
-    free_tree(node->children[i]);
+  if (node) {
+    for (int i = 0; i < node->childCount; i++) {
+      free_tree(node->children[i]);
+    }
+    g_hash_table_remove(nodeIdMap, &node->id);
+    free(node->children);
+    free(node->style);
+    free(node);
   }
-  free(node->children);
-  free(node->style);
-  free(node);
 }
 
 int append_child(TreeNode *parent, TreeNode *child) {
@@ -256,6 +262,10 @@ void update_yoga_layout() {
   YGNodeCalculateLayout(yogaRoot, VIEW_WIDTH, VIEW_HEIGHT, YGDirectionLTR);
 }
 
+TreeNode *find_node_by_id(int nodeId) {
+  return g_hash_table_lookup(nodeIdMap, &nodeId);
+}
+
 TreeNode *find_node_at_position(TreeNode *dataNode, YGNodeRef yogaNode, int x,
                                 int y) {
   float left = YGNodeLayoutGetLeft(yogaNode);
@@ -311,14 +321,14 @@ void render_tree(SDL_Renderer *renderer, YGNodeRef yogaNode, TreeNode *dataNode,
  * 主程序
  *-----------------------------------*/
 int main() {
+  nodeIdMap = g_hash_table_new(g_int_hash, g_int_equal);
   root_data =
       create_node(1.0f, 10.0f, YGFlexDirectionRow, YGJustifySpaceAround);
   root_data->style->backgroundColor = parse_color("#F0F0F0"); // 根节点浅灰背景
 
   SDL_Init(SDL_INIT_VIDEO);
   SDL_Window *window = SDL_CreateWindow(
-      "树形布局编辑器 - A:添加 D:删除 I:插入 F:切换方向 1-3:颜色 R:重置 "
-      "S:设置属性",
+      "树形布局编辑器 - A:添加 D:删除 I:插入 F:切换方向 1-3:颜色 R:重置 N:高亮下一节点 S:设置属性",
       SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, VIEW_WIDTH, VIEW_HEIGHT,
       SDL_WINDOW_SHOWN | SDL_WINDOW_RESIZABLE);
   SDL_Renderer *renderer =
@@ -386,6 +396,14 @@ int main() {
             update_yoga_layout();
             break;
           }
+          case SDLK_n: { // 高亮下一个创建的节点
+            if (selectedNode) {
+                TreeNode *targetNode = find_node_by_id(selectedNode->id + 1); // 假设要查找ID为1的节点
+                selectedNode = targetNode;
+                update_yoga_layout();
+            }
+            break;
+        }
           case SDLK_f: // 切换方向
             selectedNode->style->flexDirection =
                 (selectedNode->style->flexDirection == YGFlexDirectionRow)
@@ -424,6 +442,7 @@ int main() {
   }
 
   free_tree(root_data);
+  g_hash_table_destroy(nodeIdMap);
   SDL_DestroyRenderer(renderer);
   SDL_DestroyWindow(window);
   SDL_Quit();
