@@ -28,4 +28,5 @@ make
 ```
 
 ### preview
-![result](image.png)
+![v0](image0.png)
+![v1](image1.png)
