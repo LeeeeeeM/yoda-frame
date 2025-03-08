@@ -164,6 +164,72 @@ int remove_child(TreeNode *parent, TreeNode *child) {
 }
 
 /*-------------------------------------
+ * 新增：样式属性设置函数
+ * 参数说明：
+ * - node: 目标节点
+ * - attr: 属性名（字符串）
+ * - value: 属性值（字符串形式）
+ * 返回值：1成功 0失败
+ *-----------------------------------*/
+int set_attribute(TreeNode *node, const char *attr, const char *value) {
+  if (!node || !attr || !value)
+    return 0;
+
+  // 布局属性处理
+  if (strcmp(attr, "flex") == 0) {
+    float flex = atof(value);
+    node->style->flex = flex;
+    return 1;
+  } else if (strcmp(attr, "margin") == 0) {
+    float margin = atof(value);
+    node->style->margin = margin;
+    return 1;
+  } else if (strcmp(attr, "flexDirection") == 0) {
+    if (strcmp(value, "row") == 0) {
+      node->style->flexDirection = YGFlexDirectionRow;
+    } else if (strcmp(value, "column") == 0) {
+      node->style->flexDirection = YGFlexDirectionColumn;
+    } else {
+      return 0;
+    }
+    return 1;
+  } else if (strcmp(attr, "justifyContent") == 0) {
+    if (strcmp(value, "flex-start") == 0) {
+      node->style->justifyContent = YGJustifyFlexStart;
+    } else if (strcmp(value, "center") == 0) {
+      node->style->justifyContent = YGJustifyCenter;
+    } else if (strcmp(value, "flex-end") == 0) {
+      node->style->justifyContent = YGJustifyFlexEnd;
+    } else if (strcmp(value, "space-between") == 0) {
+      node->style->justifyContent = YGJustifySpaceBetween;
+    } else if (strcmp(value, "space-around") == 0) {
+      node->style->justifyContent = YGJustifySpaceAround;
+    } else {
+      return 0;
+    }
+    return 1;
+  }
+
+  // 渲染属性处理
+  else if (strcmp(attr, "backgroundColor") == 0) {
+    node->style->backgroundColor = parse_color(value);
+    return 1;
+  } else if (strcmp(attr, "borderColor") == 0) {
+    node->style->borderColor = parse_color(value);
+    return 1;
+  } else if (strcmp(attr, "borderWidth") == 0) {
+    float width = atof(value);
+    if (width >= 0) {
+      node->style->borderWidth = width;
+      return 1;
+    }
+    return 0;
+  }
+
+  return 0; // 未知属性
+}
+
+/*-------------------------------------
  * Yoga布局系统
  *-----------------------------------*/
 YGNodeRef create_yoga_tree(TreeNode *data) {
@@ -251,7 +317,8 @@ int main() {
 
   SDL_Init(SDL_INIT_VIDEO);
   SDL_Window *window = SDL_CreateWindow(
-      "树形布局编辑器 - A:添加 D:删除 I:插入 F:切换方向 1-3:颜色 R:重置",
+      "树形布局编辑器 - A:添加 D:删除 I:插入 F:切换方向 1-3:颜色 R:重置 "
+      "S:设置属性",
       SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, VIEW_WIDTH, VIEW_HEIGHT,
       SDL_WINDOW_SHOWN | SDL_WINDOW_RESIZABLE);
   SDL_Renderer *renderer =
@@ -311,6 +378,14 @@ int main() {
             }
             break;
           }
+          case SDLK_s: { // 示例：按S键设置属性
+            // 示例设置多个属性
+            set_attribute(selectedNode, "flex", "2.0");
+            set_attribute(selectedNode, "backgroundColor", "#FFA500");
+            set_attribute(selectedNode, "borderWidth", "3.0");
+            update_yoga_layout();
+            break;
+          }
           case SDLK_f: // 切换方向
             selectedNode->style->flexDirection =
                 (selectedNode->style->flexDirection == YGFlexDirectionRow)
@@ -330,6 +405,9 @@ int main() {
           case SDLK_r: // 重置样式
             selectedNode->style->backgroundColor = COLOR_WHITE;
             selectedNode->style->borderColor = COLOR_BLACK;
+            selectedNode->style->borderWidth = 1.0f;
+            selectedNode->style->flex = 1.0f;
+            update_yoga_layout();
             break;
           }
         }
