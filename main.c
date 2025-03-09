@@ -1,9 +1,12 @@
-#include <SDL2/SDL.h>
-#include <glib.h>
+#include <uv.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <glib.h>
+#include <SDL2/SDL.h>
 #include <yoga/Yoga.h>
+#include <quickjs.h>
+#include <quickjs-libc.h>
 
 /*-------------------------------------
  * 颜色结构体定义

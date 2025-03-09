@@ -1,3 +1,6 @@
 [submodule "yoga"]
 	path = yoga
 	url = git@github.com:LeeeeeeM/yoga.git
+[submodule "slowjs"]
+	path = slowjs
+	url = git@github.com:LeeeeeeM/slowjs.git

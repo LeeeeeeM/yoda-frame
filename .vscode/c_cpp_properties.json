@@ -4,13 +4,14 @@
             "name": "Mac",
             "includePath": [
                 "${workspaceFolder}/**",
-                "${workspaceFolder}/yoga/yoga/**",
+                "${workspaceFolder}/yoga/yoga",
+                "${workspaceFolder}/slowjs/include",
                 "/opt/homebrew/include/**",
                 "/usr/local/include/**",
                 "/opt/homebrew/include/glib-2.0",
                 "/opt/homebrew/lib/glib-2.0/include"
             ],
-            "defines": [],
+            "defines": ["__APPLE__"],
             "macFrameworkPath": [],
             "compilerPath": "/usr/bin/clang",
             "cStandard": "c23",

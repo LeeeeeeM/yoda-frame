@@ -16,6 +16,15 @@ cmake ..
 make
 ```
 
+### build quickjs
+```
+cd slowjs
+
+cmake -S . --preset=default -D CMAKE_BUILD_TYPE=Release
+
+```
+
+
 ### build project
 ```
 mkdir build
