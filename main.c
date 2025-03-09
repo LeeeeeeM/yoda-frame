@@ -177,6 +177,7 @@ typedef struct NodeStyle {
  *-----------------------------------*/
 typedef struct TreeNode {
   int id;
+  // int js_refcount; // 新增：JavaScript引用计数
   NodeStyle *style;
   int childCount;
   struct TreeNode **children;
@@ -248,6 +249,29 @@ void free_tree(TreeNode *node) {
     free(node->style);
     free(node);
   }
+}
+
+static JSClassID tree_node_class_id;
+
+JSValue wrap_node(JSContext *ctx, TreeNode *node) {
+  // 创建对象并关联类
+  JSValue obj = JS_NewObjectClass(ctx, tree_node_class_id);
+  if (JS_IsException(obj))
+    return obj;
+
+  // 绑定 C 指针到 JS 对象
+  JS_SetOpaque(obj, node);
+  // node->js_refcount++; // 增加引用计数
+  return obj;
+}
+
+// 解包 JS 对象为 TreeNode*
+TreeNode *unwrap_node(JSContext *ctx, JSValueConst val) {
+  if (!JS_IsObject(val)) {
+    JS_ThrowTypeError(ctx, "Expected TreeNode object");
+    return NULL;
+  }
+  return JS_GetOpaque(val, tree_node_class_id);
 }
 
 int append_child(TreeNode *parent, TreeNode *child) {
@@ -455,6 +479,60 @@ void render_tree(SDL_Renderer *renderer, YGNodeRef yogaNode, TreeNode *dataNode,
   }
 }
 
+static JSValue js_createNode(JSContext *ctx, JSValue this_val, int argc,
+                             JSValue *argv) {
+  // 参数解析（示例简化）
+  float64_t flex = 1.0f;
+  float64_t margin = 0.0f;
+  if (argc > 0)
+    JS_ToFloat64(ctx, &flex, argv[0]);
+  if (argc > 1)
+    JS_ToFloat64(ctx, &margin, argv[1]);
+
+  // 创建 C 层对象
+  TreeNode *node =
+      create_node(flex, margin, YGFlexDirectionRow, YGJustifyFlexStart);
+  if (!node)
+    return JS_ThrowOutOfMemory(ctx);
+
+  // 包装为 JS 对象
+  return wrap_node(ctx, node);
+}
+
+static JSValue js_update_layout(JSContext *ctx, JSValue this_val, int argc,
+                                JSValue *argv) {
+  // 直接返回根节点
+  update_yoga_layout();
+  return JS_UNDEFINED;
+}
+
+static JSValue js_appendChild(JSContext *ctx, JSValue this_val, int argc,
+                              JSValue *argv) {
+  // 参数必须为2个：parent 和 child
+  if (argc != 2) {
+    return JS_ThrowTypeError(
+        ctx, "appendChild requires 2 arguments: parent and child");
+  }
+
+  // 解包父节点和子节点
+  TreeNode *parent = unwrap_node(ctx, argv[0]);
+  TreeNode *child = unwrap_node(ctx, argv[1]);
+
+  if (!parent) {
+    return JS_ThrowTypeError(ctx, "Invalid parent node");
+  }
+  if (!child) {
+    return JS_ThrowTypeError(ctx, "Invalid child node");
+  }
+
+  // 执行添加操作
+  if (append_child(parent, child)) {
+    return JS_UNDEFINED;
+  } else {
+    return JS_ThrowInternalError(ctx, "Failed to append child");
+  }
+}
+
 /*-------------------------------------
  * 主程序
  *-----------------------------------*/
@@ -479,6 +557,11 @@ int main(int argc, char *argv[]) {
     return 1;
   }
 
+  nodeIdMap = g_hash_table_new(g_int_hash, g_int_equal);
+  root_data =
+      create_node(1.0f, 10.0f, YGFlexDirectionRow, YGJustifySpaceAround);
+  root_data->style->backgroundColor = parse_color("#F0F0F0"); // 根节点浅灰背景
+
   // 初始化 QuickJS 运行时
   rt = JS_NewRuntime();
   if (!rt) {
@@ -499,8 +582,17 @@ int main(int argc, char *argv[]) {
   js_std_init_handlers(rt);
   js_std_add_helpers(ctx, 0, NULL);
 
+  JSValue js_document = wrap_node(ctx, root_data);
+
   // 注册全局函数
   JSValue global = JS_GetGlobalObject(ctx);
+  JS_SetPropertyStr(ctx, global, "createNode",
+                    JS_NewCFunction(ctx, js_createNode, "createNode", 2));
+  JS_SetPropertyStr(ctx, global, "appendChild",
+                    JS_NewCFunction(ctx, js_appendChild, "appendChild", 2));
+  JS_SetPropertyStr(ctx, global, "updateLayout",
+                    JS_NewCFunction(ctx, js_update_layout, "updateLayout", 0));
+  JS_SetPropertyStr(ctx, global, "document", js_document);
   JS_SetPropertyStr(ctx, global, "setTimeout",
                     JS_NewCFunction(ctx, js_setTimeout, "setTimeout", 2));
   JS_SetPropertyStr(ctx, global, "setInterval",
@@ -519,11 +611,6 @@ int main(int argc, char *argv[]) {
     return 1;
   }
 
-  nodeIdMap = g_hash_table_new(g_int_hash, g_int_equal);
-  root_data =
-      create_node(1.0f, 10.0f, YGFlexDirectionRow, YGJustifySpaceAround);
-  root_data->style->backgroundColor = parse_color("#F0F0F0"); // 根节点浅灰背景
-
   SDL_Init(SDL_INIT_VIDEO);
   SDL_Window *window = SDL_CreateWindow(
       "树形布局编辑器 - A:添加 D:删除 I:插入 F:切换方向 1-3:颜色 R:重置 "
@@ -532,8 +619,6 @@ int main(int argc, char *argv[]) {
       SDL_WINDOW_SHOWN | SDL_WINDOW_RESIZABLE);
   SDL_Renderer *renderer =
       SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED);
-
-  update_yoga_layout();
 
   int quit = 0;
   while (!quit) {
@@ -548,6 +633,8 @@ int main(int argc, char *argv[]) {
         break;
       }
     } while (js_pending > 0);
+
+    js_std_loop(ctx);
 
     if (quit)
       break;
