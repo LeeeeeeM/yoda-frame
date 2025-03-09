@@ -1,12 +1,147 @@
-#include <uv.h>
+#include <SDL2/SDL.h>
+#include <glib.h>
+#include <quickjs-libc.h>
+#include <quickjs.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <glib.h>
-#include <SDL2/SDL.h>
+#include <uv.h>
 #include <yoga/Yoga.h>
-#include <quickjs.h>
-#include <quickjs-libc.h>
+
+typedef struct {
+  JSContext *ctx;
+  JSValue func;
+  uv_timer_t *timer;
+  int is_interval;
+} TimerData;
+
+// 新增：统一资源释放回调
+static void timer_close_cb(uv_handle_t *handle) {
+  TimerData *td = (TimerData *)handle->data;
+  JS_FreeValue(td->ctx, td->func);
+  free(td);
+  free(handle);
+}
+
+static void timer_cb(uv_timer_t *handle) {
+  TimerData *td = (TimerData *)handle->data;
+  JSContext *ctx = td->ctx;
+
+  JSValue ret = JS_Call(ctx, td->func, JS_UNDEFINED, 0, NULL);
+  if (JS_IsException(ret)) {
+    js_std_dump_error(ctx);
+  }
+  JS_FreeValue(ctx, ret);
+
+  if (!td->is_interval) {
+    uv_timer_stop(handle);
+    uv_close((uv_handle_t *)handle, timer_close_cb);
+  }
+}
+
+static JSValue js_setTimeout(JSContext *ctx, JSValue this_val, int argc,
+                             JSValue *argv) {
+  int64_t delay;
+  if (JS_ToInt64(ctx, &delay, argv[1]) != 0) {
+    return JS_EXCEPTION;
+  }
+
+  JSValue func = JS_DupValue(ctx, argv[0]);
+
+  uv_timer_t *timer = malloc(sizeof(uv_timer_t));
+  TimerData *td = malloc(sizeof(TimerData));
+  td->ctx = ctx;
+  td->func = func;
+  td->timer = timer;
+  td->is_interval = 0;
+
+  uv_timer_init(uv_default_loop(), timer);
+  timer->data = td;
+  uv_timer_start(timer, timer_cb, delay, 0);
+
+  return JS_NewInt64(ctx, (int64_t)timer);
+}
+
+static JSValue js_setInterval(JSContext *ctx, JSValue this_val, int argc,
+                              JSValue *argv) {
+  int64_t interval;
+  if (JS_ToInt64(ctx, &interval, argv[1]) != 0) {
+    return JS_EXCEPTION;
+  }
+
+  JSValue func = JS_DupValue(ctx, argv[0]);
+
+  uv_timer_t *timer = malloc(sizeof(uv_timer_t));
+  TimerData *td = malloc(sizeof(TimerData));
+  td->ctx = ctx;
+  td->func = func;
+  td->timer = timer;
+  td->is_interval = 1;
+
+  uv_timer_init(uv_default_loop(), timer);
+  timer->data = td;
+  uv_timer_start(timer, timer_cb, interval, interval);
+
+  return JS_NewInt64(ctx, (int64_t)timer);
+}
+
+static JSValue js_clearTimer(JSContext *ctx, JSValue this_val, int argc,
+                             JSValue *argv) {
+  int64_t timer_ptr;
+  if (JS_ToInt64(ctx, &timer_ptr, argv[0]) != 0) {
+    return JS_EXCEPTION;
+  }
+
+  uv_timer_t *timer = (uv_timer_t *)timer_ptr;
+  uv_timer_stop(timer);
+  uv_close((uv_handle_t *)timer, timer_close_cb); // 使用统一回调
+
+  return JS_UNDEFINED;
+}
+
+int readfile(const char *filename, char **out) {
+  FILE *f = fopen(filename, "rb");
+  if (!f)
+    return -1;
+
+  fseek(f, 0, SEEK_END);
+  long fsize = ftell(f);
+  fseek(f, 0, SEEK_SET);
+
+  *out = malloc(fsize + 1);
+  fread(*out, fsize, 1, f);
+  fclose(f);
+  (*out)[fsize] = 0;
+  return fsize;
+}
+
+// 清理函数封装
+void cleanup_resources(JSRuntime *rt, JSContext *ctx, uv_loop_t *loop,
+                       char *code, JSValue val) {
+  // 安全判断 JSValue 类型
+  if (!JS_IsUndefined(val)) {
+    JS_FreeValue(ctx, val);
+  }
+
+  // 释放文件内容内存
+  if (code != NULL) {
+    free(code);
+  }
+
+  // 清理 QuickJS 运行时
+  if (rt != NULL) {
+    js_std_free_handlers(rt);
+    if (ctx != NULL) {
+      JS_FreeContext(ctx);
+    }
+    JS_FreeRuntime(rt);
+  }
+
+  // 关闭 libuv 事件循环
+  if (loop != NULL) {
+    uv_loop_close(loop);
+  }
+}
 
 /*-------------------------------------
  * 颜色结构体定义
@@ -323,7 +458,67 @@ void render_tree(SDL_Renderer *renderer, YGNodeRef yogaNode, TreeNode *dataNode,
 /*-------------------------------------
  * 主程序
  *-----------------------------------*/
-int main() {
+int main(int argc, char *argv[]) {
+
+  if (argc < 2) {
+    fprintf(stderr, "Usage: %s <js-file>\n", argv[0]);
+    return 1;
+  }
+
+  char *code = NULL;
+  JSRuntime *rt = NULL;
+  JSContext *ctx = NULL;
+  uv_loop_t *loop = uv_default_loop();
+  JSValue val = JS_UNDEFINED;
+
+  // 读取文件
+  int len = readfile(argv[1], &code);
+  if (len == -1) {
+    fprintf(stderr, "Error reading file: %s\n", argv[1]);
+    cleanup_resources(NULL, NULL, loop, code, val);
+    return 1;
+  }
+
+  // 初始化 QuickJS 运行时
+  rt = JS_NewRuntime();
+  if (!rt) {
+    fprintf(stderr, "Error creating JS runtime\n");
+    cleanup_resources(NULL, NULL, loop, code, val);
+    return 1;
+  }
+
+  // 创建上下文
+  ctx = JS_NewContext(rt);
+  if (!ctx) {
+    fprintf(stderr, "Error creating JS context\n");
+    cleanup_resources(rt, NULL, loop, code, val);
+    return 1;
+  }
+
+  // 初始化标准库
+  js_std_init_handlers(rt);
+  js_std_add_helpers(ctx, 0, NULL);
+
+  // 注册全局函数
+  JSValue global = JS_GetGlobalObject(ctx);
+  JS_SetPropertyStr(ctx, global, "setTimeout",
+                    JS_NewCFunction(ctx, js_setTimeout, "setTimeout", 2));
+  JS_SetPropertyStr(ctx, global, "setInterval",
+                    JS_NewCFunction(ctx, js_setInterval, "setInterval", 2));
+  JS_SetPropertyStr(ctx, global, "clearTimeout",
+                    JS_NewCFunction(ctx, js_clearTimer, "clearTimeout", 1));
+  JS_SetPropertyStr(ctx, global, "clearInterval",
+                    JS_NewCFunction(ctx, js_clearTimer, "clearInterval", 1));
+  JS_FreeValue(ctx, global);
+
+  // 执行脚本
+  val = JS_Eval(ctx, code, len, argv[1], JS_EVAL_TYPE_MODULE);
+  if (JS_IsException(val)) {
+    js_std_dump_error(ctx);
+    cleanup_resources(rt, ctx, loop, code, val);
+    return 1;
+  }
+
   nodeIdMap = g_hash_table_new(g_int_hash, g_int_equal);
   root_data =
       create_node(1.0f, 10.0f, YGFlexDirectionRow, YGJustifySpaceAround);
@@ -331,7 +526,8 @@ int main() {
 
   SDL_Init(SDL_INIT_VIDEO);
   SDL_Window *window = SDL_CreateWindow(
-      "树形布局编辑器 - A:添加 D:删除 I:插入 F:切换方向 1-3:颜色 R:重置 N:高亮下一节点 S:设置属性",
+      "树形布局编辑器 - A:添加 D:删除 I:插入 F:切换方向 1-3:颜色 R:重置 "
+      "N:高亮下一节点 S:设置属性",
       SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, VIEW_WIDTH, VIEW_HEIGHT,
       SDL_WINDOW_SHOWN | SDL_WINDOW_RESIZABLE);
   SDL_Renderer *renderer =
@@ -341,6 +537,23 @@ int main() {
 
   int quit = 0;
   while (!quit) {
+    // 处理JavaScript异步任务
+    int js_pending;
+    do {
+      JSContext *ctx;
+      js_pending = JS_ExecutePendingJob(rt, &ctx);
+      if (js_pending < 0) {
+        js_std_dump_error(ctx);
+        quit = 1; // JS执行出错时退出
+        break;
+      }
+    } while (js_pending > 0);
+
+    if (quit)
+      break;
+
+    // 处理libuv事件（非阻塞模式）
+    uv_run(loop, UV_RUN_NOWAIT);
     SDL_Event event;
     while (SDL_PollEvent(&event)) {
       switch (event.type) {
@@ -401,12 +614,13 @@ int main() {
           }
           case SDLK_n: { // 高亮下一个创建的节点
             if (selectedNode) {
-                TreeNode *targetNode = find_node_by_id(selectedNode->id + 1); // 假设要查找ID为1的节点
-                selectedNode = targetNode;
-                update_yoga_layout();
+              TreeNode *targetNode = find_node_by_id(
+                  selectedNode->id + 1); // 假设要查找ID为1的节点
+              selectedNode = targetNode;
+              update_yoga_layout();
             }
             break;
-        }
+          }
           case SDLK_f: // 切换方向
             selectedNode->style->flexDirection =
                 (selectedNode->style->flexDirection == YGFlexDirectionRow)
@@ -444,6 +658,8 @@ int main() {
     SDL_Delay(16);
   }
 
+  // 正常退出时的清理
+  cleanup_resources(rt, ctx, loop, code, val);
   free_tree(root_data);
   g_hash_table_destroy(nodeIdMap);
   SDL_DestroyRenderer(renderer);
