@@ -39,3 +39,4 @@ make
 ### preview
 ![v0](image0.png)
 ![v1](image1.png)
+![v2](animation.gif)

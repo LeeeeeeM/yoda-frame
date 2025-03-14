@@ -23,6 +23,14 @@ static void timer_close_cb(uv_handle_t *handle) {
   free(handle);
 }
 
+// ---------------------- 遍历关闭所有定时器 ----------------------
+void close_timers_cb(uv_handle_t *handle, void *arg) {
+  if (uv_handle_get_type(handle) == UV_TIMER && !uv_is_closing(handle)) {
+    uv_timer_stop((uv_timer_t *)handle);
+    uv_close(handle, timer_close_cb);
+  }
+}
+
 static void timer_cb(uv_timer_t *handle) {
   TimerData *td = (TimerData *)handle->data;
   JSContext *ctx = td->ctx;
@@ -523,6 +531,104 @@ static JSValue js_appendChild(JSContext *ctx, JSValue this_val, int argc,
   }
 }
 
+static JSValue js_removeChild(JSContext *ctx, JSValue this_val, int argc,
+                              JSValue *argv) {
+  // 参数必须为2个：parent 和 child
+  if (argc != 2) {
+    return JS_ThrowTypeError(
+        ctx, "appendChild requires 2 arguments: parent and child");
+  }
+
+  // 解包父节点和子节点
+  TreeNode *parent = unwrap_node(ctx, argv[0]);
+  TreeNode *child = unwrap_node(ctx, argv[1]);
+
+  if (!parent) {
+    return JS_ThrowTypeError(ctx, "Invalid parent node");
+  }
+  if (!child) {
+    return JS_ThrowTypeError(ctx, "Invalid child node");
+  }
+
+  // 执行添加操作
+  if (remove_child(parent, child)) {
+    return JS_UNDEFINED;
+  } else {
+    return JS_ThrowInternalError(ctx, "Failed to remove child");
+  }
+}
+
+static JSValue js_insertBefore(JSContext *ctx, JSValue this_val, int argc,
+                               JSValue *argv) {
+  // 参数必须为3个：parent 和 child, ref
+  if (argc != 3) {
+    return JS_ThrowTypeError(
+        ctx, "appendChild requires 3 arguments: parent and child");
+  }
+
+  // 解包父节点和子节点
+  TreeNode *parent = unwrap_node(ctx, argv[0]);
+  TreeNode *child = unwrap_node(ctx, argv[1]);
+  TreeNode *ref = unwrap_node(ctx, argv[2]);
+
+  if (!parent) {
+    return JS_ThrowTypeError(ctx, "Invalid parent node");
+  }
+  if (!child) {
+    return JS_ThrowTypeError(ctx, "Invalid child node");
+  }
+
+  // 执行添加操作
+  if (insert_before(parent, child, ref)) {
+    return JS_UNDEFINED;
+  } else {
+    return JS_ThrowInternalError(ctx, "Failed to insert child");
+  }
+}
+
+static JSValue js_setAttribute(JSContext *ctx, JSValue this_val, int argc,
+                               JSValue *argv) {
+  // 参数必须为3个：node 和 key, value
+  if (argc != 3) {
+    return JS_ThrowTypeError(
+        ctx, "appendChild requires 3 arguments: parent and child");
+  }
+
+  // 解包父节点和子节点
+  TreeNode *node = unwrap_node(ctx, argv[0]);
+
+  if (!node) {
+    return JS_ThrowTypeError(ctx, "Invalid node parameter");
+  }
+
+  // 转换属性名（第二个参数）
+  const char *attr = JS_ToCString(ctx, argv[1]);
+  if (!attr) {
+    return JS_ThrowTypeError(ctx, "Invalid attribute name");
+  }
+
+  // 转换属性值（第三个参数）
+  const char *value = JS_ToCString(ctx, argv[2]);
+  if (!value) {
+    JS_FreeCString(ctx, attr); // 释放已分配的属性名
+    return JS_ThrowTypeError(ctx, "Invalid attribute value");
+  }
+
+  // 调用底层设置属性逻辑
+  int ret = set_attribute(node, attr, value);
+
+  // 释放字符串资源
+  JS_FreeCString(ctx, attr);
+  JS_FreeCString(ctx, value);
+
+  // 处理操作结果
+  if (ret == 1) {
+    return JS_UNDEFINED;
+  } else {
+    return JS_ThrowInternalError(ctx, "Failed to set attribute '%s'", attr);
+  }
+}
+
 /*-------------------------------------
  * 主程序
  *-----------------------------------*/
@@ -580,6 +686,12 @@ int main(int argc, char *argv[]) {
                     JS_NewCFunction(ctx, js_createNode, "createNode", 2));
   JS_SetPropertyStr(ctx, global, "appendChild",
                     JS_NewCFunction(ctx, js_appendChild, "appendChild", 2));
+  JS_SetPropertyStr(ctx, global, "removeChild",
+                    JS_NewCFunction(ctx, js_removeChild, "removeChild", 2));
+  JS_SetPropertyStr(ctx, global, "insertBefore",
+                    JS_NewCFunction(ctx, js_insertBefore, "insertBefore", 3));
+  JS_SetPropertyStr(ctx, global, "setAttribute",
+                    JS_NewCFunction(ctx, js_setAttribute, "setAttribute", 3));
   JS_SetPropertyStr(ctx, global, "document", js_document);
   JS_SetPropertyStr(ctx, global, "setTimeout",
                     JS_NewCFunction(ctx, js_setTimeout, "setTimeout", 2));
@@ -637,6 +749,7 @@ int main(int argc, char *argv[]) {
     while (SDL_PollEvent(&event)) {
       switch (event.type) {
       case SDL_QUIT:
+        uv_walk(loop, close_timers_cb, NULL);
         quit = 1;
         break;
 
@@ -728,6 +841,8 @@ int main(int argc, char *argv[]) {
     SDL_RenderPresent(renderer);
     SDL_Delay(16);
   }
+
+  uv_run(loop, UV_RUN_NOWAIT);
 
   // 正常退出时的清理
   cleanup_resources(rt, ctx, loop, code, val);
