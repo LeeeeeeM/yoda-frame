@@ -169,7 +169,6 @@ typedef struct NodeStyle {
   // 渲染属性
   Color backgroundColor;
   Color borderColor;
-  float borderWidth;
 } NodeStyle;
 
 /*-------------------------------------
@@ -182,6 +181,7 @@ typedef struct TreeNode {
   int childCount;
   struct TreeNode **children;
   struct TreeNode *parent;
+  YGNodeRef yogaNode;
 } TreeNode;
 
 /*-------------------------------------
@@ -216,6 +216,15 @@ Color parse_color(const char *hex) {
   return color;
 }
 
+YGNodeRef create_yoga_node(TreeNode *data) {
+  YGNodeRef yogaNode = YGNodeNew();
+  YGNodeStyleSetFlex(yogaNode, data->style->flex);
+  YGNodeStyleSetMargin(yogaNode, YGEdgeAll, data->style->margin);
+  YGNodeStyleSetFlexDirection(yogaNode, data->style->flexDirection);
+  YGNodeStyleSetJustifyContent(yogaNode, data->style->justifyContent);
+  return yogaNode;
+}
+
 TreeNode *create_node(float flex, float margin, YGFlexDirection flexDirection,
                       YGJustify justifyContent) {
   TreeNode *node = (TreeNode *)malloc(sizeof(TreeNode));
@@ -227,15 +236,15 @@ TreeNode *create_node(float flex, float margin, YGFlexDirection flexDirection,
   node->style->margin = margin;
   node->style->flexDirection = flexDirection;
   node->style->justifyContent = justifyContent;
-
   // 初始化白底黑边
   node->style->backgroundColor = COLOR_WHITE;
   node->style->borderColor = COLOR_BLACK;
-  node->style->borderWidth = 1.0f;
-
   node->childCount = 0;
   node->children = NULL;
   node->parent = NULL;
+
+  node->yogaNode = create_yoga_node(node);
+
   return node;
 }
 
@@ -244,8 +253,9 @@ void free_tree(TreeNode *node) {
     for (int i = 0; i < node->childCount; i++) {
       free_tree(node->children[i]);
     }
-    g_hash_table_remove(nodeIdMap, &node->id);
+    YGNodeFree(node->yogaNode);
     free(node->children);
+    g_hash_table_remove(nodeIdMap, &node->id);
     free(node->style);
     free(node);
   }
@@ -281,6 +291,7 @@ int append_child(TreeNode *parent, TreeNode *child) {
       realloc(parent->children, sizeof(TreeNode *) * (parent->childCount + 1));
   parent->children[parent->childCount++] = child;
   child->parent = parent;
+  YGNodeInsertChild(parent->yogaNode, child->yogaNode, parent->childCount - 1);
   return 1;
 }
 
@@ -305,6 +316,7 @@ int insert_before(TreeNode *parent, TreeNode *newChild, TreeNode *refChild) {
   parent->children[index] = newChild;
   parent->childCount++;
   newChild->parent = parent;
+  YGNodeInsertChild(parent->yogaNode, newChild->yogaNode, index);
   return 1;
 }
 
@@ -322,12 +334,13 @@ int remove_child(TreeNode *parent, TreeNode *child) {
   if (index == -1)
     return 0;
 
-  free_tree(child);
+  YGNodeRemoveChild(parent->yogaNode, child->yogaNode);
   memmove(&parent->children[index], &parent->children[index + 1],
           sizeof(TreeNode *) * (parent->childCount - index - 1));
   parent->childCount--;
   parent->children =
       realloc(parent->children, sizeof(TreeNode *) * parent->childCount);
+  free_tree(child);
   return 1;
 }
 
@@ -347,16 +360,20 @@ int set_attribute(TreeNode *node, const char *attr, const char *value) {
   if (strcmp(attr, "flex") == 0) {
     float flex = atof(value);
     node->style->flex = flex;
+    YGNodeStyleSetFlex(node->yogaNode, flex);
     return 1;
   } else if (strcmp(attr, "margin") == 0) {
     float margin = atof(value);
     node->style->margin = margin;
+    YGNodeStyleSetMargin(node->yogaNode, YGEdgeAll, margin);
     return 1;
   } else if (strcmp(attr, "flexDirection") == 0) {
     if (strcmp(value, "row") == 0) {
       node->style->flexDirection = YGFlexDirectionRow;
+      YGNodeStyleSetFlexDirection(node->yogaNode, YGFlexDirectionRow);
     } else if (strcmp(value, "column") == 0) {
       node->style->flexDirection = YGFlexDirectionColumn;
+      YGNodeStyleSetFlexDirection(node->yogaNode, YGFlexDirectionColumn);
     } else {
       return 0;
     }
@@ -364,14 +381,19 @@ int set_attribute(TreeNode *node, const char *attr, const char *value) {
   } else if (strcmp(attr, "justifyContent") == 0) {
     if (strcmp(value, "flex-start") == 0) {
       node->style->justifyContent = YGJustifyFlexStart;
+      YGNodeStyleSetJustifyContent(node->yogaNode, YGJustifyFlexStart);
     } else if (strcmp(value, "center") == 0) {
       node->style->justifyContent = YGJustifyCenter;
+      YGNodeStyleSetJustifyContent(node->yogaNode, YGJustifyCenter);
     } else if (strcmp(value, "flex-end") == 0) {
       node->style->justifyContent = YGJustifyFlexEnd;
+      YGNodeStyleSetJustifyContent(node->yogaNode, YGJustifyFlexEnd);
     } else if (strcmp(value, "space-between") == 0) {
       node->style->justifyContent = YGJustifySpaceBetween;
+      YGNodeStyleSetJustifyContent(node->yogaNode, YGJustifySpaceBetween);
     } else if (strcmp(value, "space-around") == 0) {
       node->style->justifyContent = YGJustifySpaceAround;
+      YGNodeStyleSetJustifyContent(node->yogaNode, YGJustifySpaceAround);
     } else {
       return 0;
     }
@@ -385,43 +407,16 @@ int set_attribute(TreeNode *node, const char *attr, const char *value) {
   } else if (strcmp(attr, "borderColor") == 0) {
     node->style->borderColor = parse_color(value);
     return 1;
-  } else if (strcmp(attr, "borderWidth") == 0) {
-    float width = atof(value);
-    if (width >= 0) {
-      node->style->borderWidth = width;
-      return 1;
-    }
-    return 0;
   }
 
   return 0; // 未知属性
 }
 
-/*-------------------------------------
- * Yoga布局系统
- *-----------------------------------*/
-YGNodeRef create_yoga_tree(TreeNode *data) {
-  YGNodeRef node = YGNodeNew();
-  YGNodeStyleSetFlex(node, data->style->flex);
-  YGNodeStyleSetMargin(node, YGEdgeAll, data->style->margin);
-  YGNodeStyleSetFlexDirection(node, data->style->flexDirection);
-  YGNodeStyleSetJustifyContent(node, data->style->justifyContent);
-
-  for (int i = 0; i < data->childCount; i++) {
-    YGNodeRef child = create_yoga_tree(data->children[i]);
-    YGNodeInsertChild(node, child, i);
+void update_yoga_layout(int force) {
+  if (YGNodeIsDirty(yogaRoot) || force) {
+    fprintf(stdout, "systemp ========>:  Update Layout\n");
+    YGNodeCalculateLayout(yogaRoot, VIEW_WIDTH, VIEW_HEIGHT, YGDirectionLTR);
   }
-  return node;
-}
-
-void update_yoga_layout() {
-  if (yogaRoot)
-    YGNodeFreeRecursive(yogaRoot);
-  yogaRoot = create_yoga_tree(root_data);
-  float margin = root_data->style->margin;
-  YGNodeStyleSetWidth(yogaRoot, VIEW_WIDTH - 2 * margin);
-  YGNodeStyleSetHeight(yogaRoot, VIEW_HEIGHT - 2 * margin);
-  YGNodeCalculateLayout(yogaRoot, VIEW_WIDTH, VIEW_HEIGHT, YGDirectionLTR);
 }
 
 TreeNode *find_node_by_id(int nodeId) {
@@ -452,30 +447,32 @@ TreeNode *find_node_at_position(TreeNode *dataNode, YGNodeRef yogaNode, int x,
 /*-------------------------------------
  * 渲染系统
  *-----------------------------------*/
-void render_tree(SDL_Renderer *renderer, YGNodeRef yogaNode, TreeNode *dataNode,
-                 int parentX, int parentY) {
-  int absX = parentX + (int)YGNodeLayoutGetLeft(yogaNode);
-  int absY = parentY + (int)YGNodeLayoutGetTop(yogaNode);
-  int width = (int)YGNodeLayoutGetWidth(yogaNode);
-  int height = (int)YGNodeLayoutGetHeight(yogaNode);
+void render_tree(SDL_Renderer *renderer, TreeNode *dataNode, int parentX,
+                 int parentY) {
+  if (!dataNode)
+    return;
+  YGNodeRef yogaNode = dataNode->yogaNode;
+
+  int x = parentX + (int)YGNodeLayoutGetLeft(yogaNode);
+  int y = parentY + (int)YGNodeLayoutGetTop(yogaNode);
+  int w = (int)YGNodeLayoutGetWidth(yogaNode);
+  int h = (int)YGNodeLayoutGetHeight(yogaNode);
 
   // 绘制背景
   Color bg = dataNode->style->backgroundColor;
   SDL_SetRenderDrawColor(renderer, bg.r, bg.g, bg.b, bg.a);
-  SDL_Rect bgRect = {absX, absY, width, height};
-  SDL_RenderFillRect(renderer, &bgRect);
+  SDL_Rect rect = {x, y, w, h};
+  SDL_RenderFillRect(renderer, &rect);
 
-  // 绘制边框（选中时用红色高亮）
+  // 绘制边框
   Color border = (dataNode == selectedNode) ? COLOR_HIGHLIGHT
                                             : dataNode->style->borderColor;
   SDL_SetRenderDrawColor(renderer, border.r, border.g, border.b, border.a);
-  SDL_Rect borderRect = {absX, absY, width, height};
-  SDL_RenderDrawRect(renderer, &borderRect);
+  SDL_RenderDrawRect(renderer, &rect);
 
   // 递归渲染子节点
   for (int i = 0; i < dataNode->childCount; i++) {
-    render_tree(renderer, YGNodeGetChild(yogaNode, i), dataNode->children[i],
-                absX, absY);
+    render_tree(renderer, dataNode->children[i], x, y);
   }
 }
 
@@ -497,13 +494,6 @@ static JSValue js_createNode(JSContext *ctx, JSValue this_val, int argc,
 
   // 包装为 JS 对象
   return wrap_node(ctx, node);
-}
-
-static JSValue js_update_layout(JSContext *ctx, JSValue this_val, int argc,
-                                JSValue *argv) {
-  // 直接返回根节点
-  update_yoga_layout();
-  return JS_UNDEFINED;
 }
 
 static JSValue js_appendChild(JSContext *ctx, JSValue this_val, int argc,
@@ -558,9 +548,9 @@ int main(int argc, char *argv[]) {
   }
 
   nodeIdMap = g_hash_table_new(g_int_hash, g_int_equal);
-  root_data =
-      create_node(1.0f, 10.0f, YGFlexDirectionRow, YGJustifySpaceAround);
+  root_data = create_node(1.0f, 10.0f, YGFlexDirectionRow, YGJustifyFlexStart);
   root_data->style->backgroundColor = parse_color("#F0F0F0"); // 根节点浅灰背景
+  yogaRoot = root_data->yogaNode;
 
   // 初始化 QuickJS 运行时
   rt = JS_NewRuntime();
@@ -590,8 +580,6 @@ int main(int argc, char *argv[]) {
                     JS_NewCFunction(ctx, js_createNode, "createNode", 2));
   JS_SetPropertyStr(ctx, global, "appendChild",
                     JS_NewCFunction(ctx, js_appendChild, "appendChild", 2));
-  JS_SetPropertyStr(ctx, global, "updateLayout",
-                    JS_NewCFunction(ctx, js_update_layout, "updateLayout", 0));
   JS_SetPropertyStr(ctx, global, "document", js_document);
   JS_SetPropertyStr(ctx, global, "setTimeout",
                     JS_NewCFunction(ctx, js_setTimeout, "setTimeout", 2));
@@ -641,6 +629,10 @@ int main(int argc, char *argv[]) {
 
     // 处理libuv事件（非阻塞模式）
     uv_run(loop, UV_RUN_NOWAIT);
+
+    if (!uv_loop_alive(loop))
+      break;
+
     SDL_Event event;
     while (SDL_PollEvent(&event)) {
       switch (event.type) {
@@ -652,7 +644,7 @@ int main(int argc, char *argv[]) {
         if (event.window.event == SDL_WINDOWEVENT_SIZE_CHANGED) {
           VIEW_WIDTH = event.window.data1;
           VIEW_HEIGHT = event.window.data2;
-          update_yoga_layout();
+          update_yoga_layout(1);
         }
         break;
 
@@ -667,27 +659,25 @@ int main(int argc, char *argv[]) {
         if (selectedNode) {
           switch (event.key.keysym.sym) {
           case SDLK_a: { // 添加子节点
-            TreeNode *child = create_node(1.0f, 5.0f, YGFlexDirectionColumn,
-                                          YGJustifyFlexStart);
-            if (append_child(selectedNode, child))
-              update_yoga_layout();
+            TreeNode *child =
+                create_node(1.0f, 5.0f, YGFlexDirectionRow, YGJustifyFlexStart);
+            append_child(selectedNode, child);
             break;
           }
-          case SDLK_d: // 删除节点
+          case SDLK_d: {
+            // 删除节点
             if (selectedNode->parent) {
               if (remove_child(selectedNode->parent, selectedNode)) {
                 selectedNode = NULL;
-                update_yoga_layout();
               }
             }
             break;
+          }
           case SDLK_i: { // 插入节点
             if (selectedNode->parent) {
               TreeNode *newNode = create_node(1.0f, 5.0f, YGFlexDirectionRow,
                                               YGJustifyFlexStart);
-              if (insert_before(selectedNode->parent, newNode, selectedNode)) {
-                update_yoga_layout();
-              }
+              insert_before(selectedNode->parent, newNode, selectedNode);
             }
             break;
           }
@@ -695,41 +685,35 @@ int main(int argc, char *argv[]) {
             // 示例设置多个属性
             set_attribute(selectedNode, "flex", "2.0");
             set_attribute(selectedNode, "backgroundColor", "#FFA500");
-            set_attribute(selectedNode, "borderWidth", "3.0");
-            update_yoga_layout();
             break;
           }
           case SDLK_n: { // 高亮下一个创建的节点
-            if (selectedNode) {
-              TreeNode *targetNode = find_node_by_id(
-                  selectedNode->id + 1); // 假设要查找ID为1的节点
-              selectedNode = targetNode;
-              update_yoga_layout();
-            }
+            TreeNode *targetNode =
+                find_node_by_id(selectedNode->id + 1); // 假设要查找ID为1的节点
+            selectedNode = targetNode;
             break;
           }
-          case SDLK_f: // 切换方向
-            selectedNode->style->flexDirection =
+          case SDLK_f: {
+            // 切换方向
+            set_attribute(
+                selectedNode, "flexDirection",
                 (selectedNode->style->flexDirection == YGFlexDirectionRow)
-                    ? YGFlexDirectionColumn
-                    : YGFlexDirectionRow;
-            update_yoga_layout();
+                    ? "column"
+                    : "row");
             break;
+          }
           case SDLK_1: // 红色主题
-            selectedNode->style->backgroundColor = COLOR_RED;
+            set_attribute(selectedNode, "backgroundColor", "#FF0000");
             break;
           case SDLK_2: // 绿色主题
-            selectedNode->style->backgroundColor = parse_color("#00FF00");
+            set_attribute(selectedNode, "backgroundColor", "#00FF00");
             break;
           case SDLK_3: // 蓝色主题
-            selectedNode->style->backgroundColor = parse_color("#0000FF");
+            set_attribute(selectedNode, "backgroundColor", "#0000FF");
             break;
           case SDLK_r: // 重置样式
-            selectedNode->style->backgroundColor = COLOR_WHITE;
-            selectedNode->style->borderColor = COLOR_BLACK;
-            selectedNode->style->borderWidth = 1.0f;
-            selectedNode->style->flex = 1.0f;
-            update_yoga_layout();
+            set_attribute(selectedNode, "backgroundColor", "#FFFFFF");
+            set_attribute(selectedNode, "flex", "1.0");
             break;
           }
         }
@@ -737,10 +721,10 @@ int main(int argc, char *argv[]) {
       }
     }
 
+    update_yoga_layout(0);
     SDL_SetRenderDrawColor(renderer, 240, 240, 240, 255);
     SDL_RenderClear(renderer);
-    if (yogaRoot)
-      render_tree(renderer, yogaRoot, root_data, 0, 0);
+    render_tree(renderer, root_data, 0, 0);
     SDL_RenderPresent(renderer);
     SDL_Delay(16);
   }
