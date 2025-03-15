@@ -742,14 +742,15 @@ int main(int argc, char *argv[]) {
     // 处理libuv事件（非阻塞模式）
     uv_run(loop, UV_RUN_NOWAIT);
 
-    if (!uv_loop_alive(loop))
-      break;
+    // if (!uv_loop_alive(loop))
+    //   break;
 
     SDL_Event event;
     while (SDL_PollEvent(&event)) {
       switch (event.type) {
       case SDL_QUIT:
         uv_walk(loop, close_timers_cb, NULL);
+        uv_run(loop, UV_RUN_NOWAIT);
         quit = 1;
         break;
 
@@ -841,8 +842,6 @@ int main(int argc, char *argv[]) {
     SDL_RenderPresent(renderer);
     SDL_Delay(16);
   }
-
-  uv_run(loop, UV_RUN_NOWAIT);
 
   // 正常退出时的清理
   cleanup_resources(rt, ctx, loop, code, val);
