@@ -4,3 +4,6 @@
 [submodule "slowjs"]
 	path = slowjs
 	url = git@github.com:LeeeeeeM/slowjs.git
+[submodule "yoda-react-reconciler"]
+	path = yoda-react-reconciler
+	url = git@github.com:LeeeeeeM/yoda-react-reconciler.git

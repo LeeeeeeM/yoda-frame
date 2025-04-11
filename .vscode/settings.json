@@ -1,3 +1,9 @@
 {
-  "C_Cpp.errorSquiggles": "disabled"
+  "C_Cpp.errorSquiggles": "disabled",
+  "files.associations": {
+    "quickjs.h": "c",
+    "quickjs-libc.h": "c",
+    "string.h": "c",
+    "sdl.h": "c"
+  }
 }

@@ -1,6 +1,6 @@
 const colorList = ["#FF0000", "#00FF00", "#0000FF"];
 const genColor = () => {
-  return colorList[(Math.random() * 1000 >>> 0) % colorList.length];
+  return colorList[((Math.random() * 1000) >>> 0) % colorList.length];
 };
 
 setTimeout(() => {
@@ -9,12 +9,18 @@ setTimeout(() => {
   const child1 = createNode(1.0, 5.0);
   const child2 = createNode(1.0, 5.0);
 
+  let a = () => {
+    print("click this node -----------");
+  }
+
   // 添加子节点
   appendChild(parent, child1);
   appendChild(parent, child2);
   setAttribute(child1, "backgroundColor", genColor());
   setAttribute(child2, "backgroundColor", genColor());
   appendChild(document, parent);
+  addEventListener(parent, "click", a);
+
   let lastNode;
   setInterval(() => {
     // if (lastNode) {
@@ -22,8 +28,11 @@ setTimeout(() => {
     // }
     lastNode = createNode(1.0, 5.0);
     appendChild(parent, lastNode);
+    addEventListener(lastNode, "click", a);
+    // dispatchEvent(parent, "click");
+    // removeEventListener(parent, "click", a);
     setAttribute(lastNode, "backgroundColor", genColor());
-  }, 1000);
+  }, 5000);
 }, 500);
 
 let a = setTimeout(() => {

@@ -179,6 +179,13 @@ typedef struct NodeStyle {
   Color borderColor;
 } NodeStyle;
 
+// 定义事件监听器结构体
+typedef struct EventListener {
+  char *event_type; // 事件类型
+  JSValue callback; // 回调函数
+  struct EventListener *next;
+} EventListener;
+
 /*-------------------------------------
  * 树节点结构体定义
  *-----------------------------------*/
@@ -190,6 +197,7 @@ typedef struct TreeNode {
   struct TreeNode **children;
   struct TreeNode *parent;
   YGNodeRef yogaNode;
+  EventListener *event_listeners; // 存储事件监听器
 } TreeNode;
 
 /*-------------------------------------
@@ -236,7 +244,7 @@ YGNodeRef create_yoga_node(TreeNode *data) {
 TreeNode *create_node(float flex, float margin, YGFlexDirection flexDirection,
                       YGJustify justifyContent) {
   TreeNode *node = (TreeNode *)malloc(sizeof(TreeNode));
-  node->id = nextNodeId++;
+  node->id = ++nextNodeId;
   g_hash_table_insert(nodeIdMap, &node->id, node);
 
   node->style = (NodeStyle *)malloc(sizeof(NodeStyle));
@@ -250,22 +258,79 @@ TreeNode *create_node(float flex, float margin, YGFlexDirection flexDirection,
   node->childCount = 0;
   node->children = NULL;
   node->parent = NULL;
+  node->event_listeners = NULL;
 
   node->yogaNode = create_yoga_node(node);
 
   return node;
 }
 
-void free_tree(TreeNode *node) {
+void free_tree(JSContext *ctx, TreeNode *node) {
   if (node) {
+    EventListener *listener = node->event_listeners;
+    while (listener) {
+      EventListener *next = listener->next;
+      JS_FreeValue(ctx, listener->callback);
+      free(listener->event_type);
+      free(listener);
+      listener = next;
+    }
+    node->event_listeners = NULL;
     for (int i = 0; i < node->childCount; i++) {
-      free_tree(node->children[i]);
+      free_tree(ctx, node->children[i]);
     }
     YGNodeFree(node->yogaNode);
     free(node->children);
     g_hash_table_remove(nodeIdMap, &node->id);
     free(node->style);
     free(node);
+  }
+}
+
+void add_listener(JSContext *ctx, TreeNode *node, const char *event_type,
+                  JSValue callback) {
+  if (!node || !event_type || JS_IsNull(callback) || JS_IsUndefined(callback)) {
+    return;
+  }
+  // printf("step into add_listener %s id: %d\n", event_type, node->id);
+  // 分配内存并初始化新的事件监听器
+  EventListener *new_listener = malloc(sizeof(EventListener));
+  new_listener->event_type = strdup(event_type);
+  new_listener->callback = JS_DupValue(ctx, callback);
+  new_listener->next = NULL;
+  // 将新监听器添加到链表头部
+  EventListener *current = node->event_listeners;
+  if (current == NULL) {
+    node->event_listeners = new_listener;
+  } else {
+    new_listener->next = current;
+    node->event_listeners = new_listener;
+  }
+}
+
+void remove_listener(JSContext *ctx, TreeNode *node, const char *event_type,
+                     JSValue callback) {
+  if (!node || !event_type || JS_IsNull(callback) || JS_IsUndefined(callback)) {
+    return;
+  }
+
+  // printf("step into remove_listener %s id: %d\n", event_type, node->id);
+
+  EventListener **prev_ptr = &node->event_listeners;
+  EventListener *current = node->event_listeners;
+
+  while (current) {
+    if (strcmp(current->event_type, event_type) == 0 &&
+        JS_VALUE_GET_OBJ(current->callback) == JS_VALUE_GET_OBJ(callback)) {
+      // 移除当前节点
+      *prev_ptr = current->next;
+      JS_FreeValue(ctx, current->callback); // 使用传入的 ctx
+      free(current->event_type);
+      free(current);
+      break;
+    }
+    prev_ptr = &current->next;
+    current = current->next;
   }
 }
 
@@ -281,6 +346,36 @@ JSValue wrap_node(JSContext *ctx, TreeNode *node) {
   JS_SetOpaque(obj, node);
   // node->js_refcount++; // 增加引用计数
   return obj;
+}
+
+void dispatch_event(JSContext *ctx, TreeNode *node, const char *event_type) {
+  if (!node || !event_type)
+    return;
+
+  // 创建合成事件对象（仅包含必要字段）
+  JSValue event_obj = JS_NewObject(ctx);
+  JS_SetPropertyStr(ctx, event_obj, "type", JS_NewString(ctx, event_type));
+  JS_SetPropertyStr(ctx, event_obj, "target",
+                    wrap_node(ctx, node)); // wrap_node 需提前实现
+
+  // 遍历当前节点的监听器
+  EventListener *listener = node->event_listeners;
+  while (listener) {
+    if (strcmp(listener->event_type, event_type) == 0) {
+      // 调用 JS 回调函数
+      JSValue ret =
+          JS_Call(ctx, listener->callback, JS_UNDEFINED, 1, &event_obj);
+      if (JS_IsException(ret)) {
+        // 处理异常（例如打印错误）
+        js_std_dump_error(ctx);
+      }
+      JS_FreeValue(ctx, ret);
+    }
+    listener = listener->next;
+  }
+
+  // 释放事件对象
+  JS_FreeValue(ctx, event_obj);
 }
 
 // 解包 JS 对象为 TreeNode*
@@ -328,7 +423,7 @@ int insert_before(TreeNode *parent, TreeNode *newChild, TreeNode *refChild) {
   return 1;
 }
 
-int remove_child(TreeNode *parent, TreeNode *child) {
+int remove_child(JSContext *ctx, TreeNode *parent, TreeNode *child) {
   if (!parent || !child || parent != child->parent)
     return 0;
 
@@ -348,7 +443,7 @@ int remove_child(TreeNode *parent, TreeNode *child) {
   parent->childCount--;
   parent->children =
       realloc(parent->children, sizeof(TreeNode *) * parent->childCount);
-  free_tree(child);
+  free_tree(ctx, child);
   return 1;
 }
 
@@ -531,6 +626,57 @@ static JSValue js_appendChild(JSContext *ctx, JSValue this_val, int argc,
   }
 }
 
+// JS 绑定的 addEventListener
+static JSValue js_addEventListener(JSContext *ctx, JSValueConst this_val,
+                                   int argc, JSValueConst *argv) {
+  if (argc != 3) {
+    return JS_ThrowTypeError(
+        ctx, "addEventListener requires 3 arguments: node & type & callback");
+  }
+  TreeNode *node = unwrap_node(ctx, argv[0]);
+  const char *event_type = JS_ToCString(ctx, argv[1]);
+  JSValue callback = argv[2];
+
+  // 调用 C 函数时传递 ctx
+  add_listener(ctx, node, event_type, callback);
+  JS_FreeCString(ctx, event_type);
+  return JS_UNDEFINED;
+}
+
+// JS 绑定的 removeEventListener
+static JSValue js_removeEventListener(JSContext *ctx, JSValueConst this_val,
+                                      int argc, JSValueConst *argv) {
+  if (argc != 3) {
+    return JS_ThrowTypeError(
+        ctx,
+        "removeEventListener requires 3 arguments: node & type & callback");
+  }
+  TreeNode *node = unwrap_node(ctx, argv[0]);
+  const char *event_type = JS_ToCString(ctx, argv[1]);
+  JSValue callback = argv[2];
+
+  // 调用 C 函数时传递 ctx
+  remove_listener(ctx, node, event_type, callback);
+  JS_FreeCString(ctx, event_type);
+  return JS_UNDEFINED;
+}
+
+static JSValue js_dispatchEvent(JSContext *ctx, JSValueConst this_val, int argc,
+                                JSValueConst *argv) {
+  if (argc != 2) {
+    return JS_ThrowTypeError(ctx,
+                             "dispatchEvent requires 2 arguments: node & type");
+  }
+  TreeNode *node = unwrap_node(ctx, argv[0]);
+  const char *event_type = JS_ToCString(ctx, argv[1]);
+
+  // 调用 C 层函数
+  dispatch_event(ctx, node, event_type);
+
+  JS_FreeCString(ctx, event_type);
+  return JS_UNDEFINED;
+}
+
 static JSValue js_removeChild(JSContext *ctx, JSValue this_val, int argc,
                               JSValue *argv) {
   // 参数必须为2个：parent 和 child
@@ -551,7 +697,7 @@ static JSValue js_removeChild(JSContext *ctx, JSValue this_val, int argc,
   }
 
   // 执行添加操作
-  if (remove_child(parent, child)) {
+  if (remove_child(ctx, parent, child)) {
     return JS_UNDEFINED;
   } else {
     return JS_ThrowInternalError(ctx, "Failed to remove child");
@@ -692,6 +838,15 @@ int main(int argc, char *argv[]) {
                     JS_NewCFunction(ctx, js_insertBefore, "insertBefore", 3));
   JS_SetPropertyStr(ctx, global, "setAttribute",
                     JS_NewCFunction(ctx, js_setAttribute, "setAttribute", 3));
+  JS_SetPropertyStr(
+      ctx, global, "addEventListener",
+      JS_NewCFunction(ctx, js_addEventListener, "addEventListener", 3));
+  JS_SetPropertyStr(
+      ctx, global, "removeEventListener",
+      JS_NewCFunction(ctx, js_removeEventListener, "removeEventListener", 3));
+
+  JS_SetPropertyStr(ctx, global, "dispatchEvent",
+                    JS_NewCFunction(ctx, js_dispatchEvent, "dispatchEvent", 2));
   JS_SetPropertyStr(ctx, global, "document", js_document);
   JS_SetPropertyStr(ctx, global, "setTimeout",
                     JS_NewCFunction(ctx, js_setTimeout, "setTimeout", 2));
@@ -766,6 +921,7 @@ int main(int argc, char *argv[]) {
         int x = event.button.x;
         int y = event.button.y;
         selectedNode = find_node_at_position(root_data, yogaRoot, x, y);
+        dispatch_event(ctx, selectedNode, "click");
         break;
       }
 
@@ -781,7 +937,7 @@ int main(int argc, char *argv[]) {
           case SDLK_d: {
             // 删除节点
             if (selectedNode->parent) {
-              if (remove_child(selectedNode->parent, selectedNode)) {
+              if (remove_child(ctx, selectedNode->parent, selectedNode)) {
                 selectedNode = NULL;
               }
             }
@@ -844,8 +1000,8 @@ int main(int argc, char *argv[]) {
   }
 
   // 正常退出时的清理
+  free_tree(ctx, root_data);
   cleanup_resources(rt, ctx, loop, code, val);
-  free_tree(root_data);
   g_hash_table_destroy(nodeIdMap);
   SDL_DestroyRenderer(renderer);
   SDL_DestroyWindow(window);

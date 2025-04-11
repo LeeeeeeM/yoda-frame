@@ -36,6 +36,25 @@ cmake ..
 make
 ```
 
+### build react-reconciler
+```
+cd yoda-react-reconciler
+
+pnpm install
+
+npm run build
+
+move dist/*.js ../js/
+```
+
+### run
+```
+cd build
+
+// rename demo.js to your own file, e.g. demo.txt
+./main ../js/demo.txt   
+```
+
 ### preview
 ![v0](image0.png)
 ![v1](image1.png)
