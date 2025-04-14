@@ -31,24 +31,30 @@ find_path(QUICKJS_HEADERS
 
 # 查找静态库
 find_library(QUICKJS_LIB
-  NAMES quickjs libquickjs.a
-  HINTS ${QUICKJS_SRC_DIR}  # libquickjs.a 的路径
+  NAMES quickjs
+  HINTS ${QUICKJS_SRC_DIR}
   NO_DEFAULT_PATH
 )
+
 find_library(QJSLIBS_LIB
-  NAMES qjslibs libqjslibs.a
-  HINTS ${QUICKJS_LIBS_DIR}  # libqjslibs.a 的路径
+  NAMES qjslibs
+  HINTS ${QUICKJS_LIBS_DIR}
   NO_DEFAULT_PATH
 )
 
 find_path(SDL2_INCLUDE_DIR
-  NAMES SDL2/SDL.h
+  NAMES SDL2/SDL.h SDL2/SDL_ttf.h
   # 覆盖常见路径
   PATHS /usr/include /usr/local/include /opt/homebrew/include
 )
 
+find_library(SDL2_TTF_LIBRARY
+  NAMES SDL2_ttf
+  PATHS /usr/lib /usr/local/lib /opt/homebrew/lib
+)
+
 find_library(SDL2_LIBRARY
-  NAMES SDL2 libSDL2.dylib
+  NAMES SDL2
   # 覆盖常见路径
   PATHS /usr/lib /usr/local/lib /opt/homebrew/lib
 )
@@ -59,7 +65,7 @@ find_path(LIBUV_INCLUDE_DIR
 )
 
 find_library(LIBUV_LIBRARY
-  NAMES uv libuv.dylib
+  NAMES uv
   PATHS /usr/lib /usr/local/lib /opt/homebrew/lib  # 覆盖常见路径
 )
 
@@ -69,13 +75,29 @@ set(GLIB_INCLUDE_EXTRA "/opt/homebrew/lib/glib-2.0/include")  # 这个路径经�
 
 # 手动指定库和头文件
 find_library(GLIB_LIBRARY
-    NAMES glib-2.0
-    PATHS ${GLIB_LIB_PATH}
-    NO_DEFAULT_PATH
+  NAMES glib-2.0
+  PATHS ${GLIB_LIB_PATH}
+  NO_DEFAULT_PATH
 )
 
-add_executable(main main.c)
+add_executable(main test.c)
 
-include_directories(${YOGA_INCLUDE_DIR} ${SDL2_INCLUDE_DIR} ${GLIB_INCLUDE_PATH} ${GLIB_INCLUDE_EXTRA} ${LIBUV_INCLUDE_DIR} ${QUICKJS_HEADERS})
+include_directories(
+  ${YOGA_INCLUDE_DIR}
+  ${SDL2_INCLUDE_DIR}
+  ${GLIB_INCLUDE_PATH}
+  ${GLIB_INCLUDE_EXTRA}
+  ${LIBUV_INCLUDE_DIR}
+  ${QUICKJS_HEADERS}
+)
 
-target_link_libraries(main ${YOGA_LIBRARY} ${SDL2_LIBRARY} ${GLIB_LIBRARY} ${LIBUV_LIBRARY} ${QUICKJS_LIB} ${QJSLIBS_LIB})
+target_link_libraries(
+  main
+  ${YOGA_LIBRARY}
+  ${SDL2_LIBRARY}
+  ${SDL2_TTF_LIBRARY}
+  ${GLIB_LIBRARY}
+  ${LIBUV_LIBRARY}
+  ${QUICKJS_LIB}
+  ${QJSLIBS_LIB}
+)

@@ -32,7 +32,7 @@ setTimeout(() => {
     // dispatchEvent(parent, "click");
     // removeEventListener(parent, "click", a);
     setAttribute(lastNode, "backgroundColor", genColor());
-  }, 5000);
+  }, 2000);
 }, 500);
 
 let a = setTimeout(() => {
