@@ -56,7 +56,20 @@ cd build
 ```
 
 ### preview
+
+#### v0.0.0
 ![v0](image0.png)
 ![v1](image1.png)
+
+#### v0.1.0
 ![v2](animation.gif)
 ![v3](reconciler.gif)
+
+### v0.2.0  
+
+Use React to Build APP
+
+https://github.com/LeeeeeeM/yoda-react-reconciler
+
+![react](react-app.png)
+![v4](animation-v2.gif)

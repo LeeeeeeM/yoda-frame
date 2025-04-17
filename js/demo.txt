@@ -5499,13 +5499,15 @@
     YELLOW: "#ffff00",
     WHITE: "#ffffff"
   };
+  const DIV1_COLOR_LIST = [COLOR_MAP.RED, COLOR_MAP.GREEN, COLOR_MAP.BLUE];
   function App() {
     const [count, setCount] = reactExports.useState(0);
-    const [div1Color, setDiv1Color] = reactExports.useState(COLOR_MAP.RED);
+    const [colorIndex, setColorIndex] = reactExports.useState(0);
     const [div2Flex, setDiv2Flex] = reactExports.useState(1);
     const [div3Flex, setDiv3Flex] = reactExports.useState(1);
     const [text, setText] = reactExports.useState(TEXT_MAP.LOCKED);
     const openRef = reactExports.useRef(false);
+    const NODE = HOST_TAG.NODE;
     const openColor = reactExports.useMemo(() => {
       return text === TEXT_MAP.UNLOCKED ? COLOR_MAP.YELLOW : COLOR_MAP.WHITE;
     }, [text]);
@@ -5522,8 +5524,8 @@
         return;
       }
       console.log("正在切换 div1 的颜色");
-      setDiv1Color(div1Color === COLOR_MAP.RED ? COLOR_MAP.BLUE : COLOR_MAP.RED);
-    }, [div1Color]);
+      setColorIndex((colorIndex2) => (colorIndex2 + 1) % DIV1_COLOR_LIST.length);
+    }, []);
     const handleClick2 = reactExports.useCallback(() => {
       if (!openRef.current) {
         console.log("openRef.current is false, 请打开父级开关");
@@ -5537,7 +5539,7 @@
         console.log("openRef.current is false, 请打开父级开关");
         return;
       }
-      console.log("正在切换 div3 的颜色");
+      console.log("正在切换 div3 的flex");
       setDiv3Flex(div3Flex === 1 ? 2 : 1);
     }, [div3Flex]);
     reactExports.useEffect(() => {
@@ -5547,72 +5549,57 @@
       return () => clearInterval(interval);
     }, []);
     return /* @__PURE__ */ jsxRuntimeExports.jsxs(jsxRuntimeExports.Fragment, { children: [
-      /* @__PURE__ */ jsxRuntimeExports.jsx(HOST_TAG.NODE, { style: { margin: 10 }, children: `HELLO WORLD!` }),
-      /* @__PURE__ */ jsxRuntimeExports.jsxs(
-        HOST_TAG.NODE,
-        {
-          style: { flex: 2, margin: 5, flexDirection: "column" },
-          children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsx(NODE, { style: { margin: 10 }, children: `HELLO WORLD!` }),
+      /* @__PURE__ */ jsxRuntimeExports.jsxs(NODE, { style: { flex: 2, margin: 5, flexDirection: "column" }, children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx(
+          NODE,
+          {
+            style: { flex: 1, margin: 5, backgroundColor: openColor },
+            onClick: switchRef,
+            children: `Click me to switch. It's ${text} now. Now U can ${openRef.current ? "" : "not"} click Nodes below.`
+          }
+        ),
+        /* @__PURE__ */ jsxRuntimeExports.jsxs(NODE, { style: { flex: 3, margin: 5, flexDirection: "column" }, children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsx(
+            NODE,
+            {
+              style: {
+                margin: 15,
+                backgroundColor: DIV1_COLOR_LIST[colorIndex]
+              },
+              onClick: handleClick1,
+              children: `Div1 Current Color: ${DIV1_COLOR_LIST[colorIndex]}. Click me to change`
+            }
+          ),
+          /* @__PURE__ */ jsxRuntimeExports.jsxs(NODE, { style: { margin: 5 }, children: [
             /* @__PURE__ */ jsxRuntimeExports.jsx(
-              HOST_TAG.NODE,
+              NODE,
               {
-                style: { flex: 1, margin: 5, backgroundColor: openColor },
-                onClick: switchRef,
-                children: `Click me to switch. It's ${text} now. Now U can ${openRef.current ? "" : "not"} click Nodes below.`
+                style: {
+                  flex: div2Flex,
+                  margin: 5,
+                  backgroundColor: COLOR_MAP.GREEN
+                },
+                onClick: handleClick2,
+                children: `Div2 Flex: ${div2Flex}. Click me to change`
               }
             ),
-            /* @__PURE__ */ jsxRuntimeExports.jsxs(
-              HOST_TAG.NODE,
+            /* @__PURE__ */ jsxRuntimeExports.jsx(
+              NODE,
               {
-                style: { flex: 3, margin: 5, flexDirection: "column" },
-                children: [
-                  /* @__PURE__ */ jsxRuntimeExports.jsx(
-                    HOST_TAG.NODE,
-                    {
-                      style: { margin: 15, backgroundColor: div1Color },
-                      onClick: handleClick1,
-                      children: `Div1 Current Color: ${div1Color}. Click me to change`
-                    }
-                  ),
-                  /* @__PURE__ */ jsxRuntimeExports.jsxs(HOST_TAG.NODE, { style: { margin: 5 }, children: [
-                    /* @__PURE__ */ jsxRuntimeExports.jsx(
-                      HOST_TAG.NODE,
-                      {
-                        style: {
-                          flex: div2Flex,
-                          margin: 5,
-                          backgroundColor: COLOR_MAP.GREEN
-                        },
-                        onClick: handleClick2,
-                        children: `Div2 Flex: ${div2Flex}. Click me to change`
-                      }
-                    ),
-                    /* @__PURE__ */ jsxRuntimeExports.jsx(
-                      HOST_TAG.NODE,
-                      {
-                        style: {
-                          flex: div3Flex,
-                          margin: 5,
-                          backgroundColor: COLOR_MAP.RED
-                        },
-                        onClick: handleClick3,
-                        children: `Div3 Flex: ${div3Flex}. Click me to change`
-                      }
-                    )
-                  ] })
-                ]
+                style: {
+                  flex: div3Flex,
+                  margin: 5,
+                  backgroundColor: COLOR_MAP.RED
+                },
+                onClick: handleClick3,
+                children: `Div3 Flex: ${div3Flex}. Click me to change`
               }
             )
-          ]
-        }
-      ),
-      /* @__PURE__ */ jsxRuntimeExports.jsx(
-        HOST_TAG.NODE,
-        {
-          style: { flex: 1, margin: 5, flexDirection: "column" },
-          children: `Start: ${count} seconds`
-        }
-      )
+          ] })
+        ] })
+      ] }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx(NODE, { style: { flex: 1, margin: 5, flexDirection: "column" }, children: `Start: ${count} seconds` })
     ] });
   }
   createRoot().render(
