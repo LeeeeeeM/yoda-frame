@@ -1,4 +1,5 @@
 #include <SDL2/SDL.h>
+#include <SDL2/SDL_ttf.h>
 #include <glib.h>
 #include <quickjs-libc.h>
 #include <quickjs.h>
@@ -159,6 +160,7 @@ typedef struct {
 } Color;
 
 // 预设颜色
+static const Color COLOR_TRANSPARENT = {255, 255, 255, 0};
 static const Color COLOR_WHITE = {255, 255, 255, 255};
 static const Color COLOR_BLACK = {0, 0, 0, 255};
 static const Color COLOR_RED = {255, 0, 0, 255};
@@ -186,11 +188,18 @@ typedef struct EventListener {
   struct EventListener *next;
 } EventListener;
 
+typedef enum {
+  NODE, // 普通节点
+  TEXT  // 文字节点
+} NodeType;
+
 /*-------------------------------------
  * 树节点结构体定义
  *-----------------------------------*/
 typedef struct TreeNode {
   int id;
+  NodeType node_type;
+  char *text;
   // int js_refcount; // 新增：JavaScript引用计数
   NodeStyle *style;
   int childCount;
@@ -241,11 +250,19 @@ YGNodeRef create_yoga_node(TreeNode *data) {
   return yogaNode;
 }
 
-TreeNode *create_node(float flex, float margin, YGFlexDirection flexDirection,
+TreeNode *create_node(NodeType node_type, const char *text, float flex,
+                      float margin, YGFlexDirection flexDirection,
                       YGJustify justifyContent) {
   TreeNode *node = (TreeNode *)malloc(sizeof(TreeNode));
   node->id = ++nextNodeId;
   g_hash_table_insert(nodeIdMap, &node->id, node);
+
+  node->node_type = node_type;
+  if (node_type == TEXT) {
+    node->text = strdup(text); // 复制文字内容
+  } else {
+    node->text = NULL;
+  }
 
   node->style = (NodeStyle *)malloc(sizeof(NodeStyle));
   node->style->flex = flex;
@@ -265,8 +282,19 @@ TreeNode *create_node(float flex, float margin, YGFlexDirection flexDirection,
   return node;
 }
 
+void set_node_text(TreeNode *node, const char *text) {
+  if (!node || node->node_type != TEXT) {
+    return;
+  }
+  free(node->text);          // 释放旧的文字内容
+  node->text = strdup(text); // 复制新的文字内容
+}
+
 void free_tree(JSContext *ctx, TreeNode *node) {
   if (node) {
+    if (node->node_type == TEXT) {
+      free(node->text);
+    }
     EventListener *listener = node->event_listeners;
     while (listener) {
       EventListener *next = listener->next;
@@ -533,6 +561,9 @@ TreeNode *find_node_at_position(TreeNode *dataNode, YGNodeRef yogaNode, int x,
   float width = YGNodeLayoutGetWidth(yogaNode);
   float height = YGNodeLayoutGetHeight(yogaNode);
 
+  if (dataNode->node_type == TEXT) {
+    return NULL;
+  }
   if (x < left || x > left + width || y < top || y > top + height)
     return NULL;
 
@@ -547,11 +578,34 @@ TreeNode *find_node_at_position(TreeNode *dataNode, YGNodeRef yogaNode, int x,
   return dataNode;
 }
 
+void render_text(TTF_Font *font, SDL_Renderer *renderer, TreeNode *node, int x,
+                 int y, int w, int h) {
+
+  // 设置文字颜色
+  SDL_Color color = {0, 0, 0, 255}; // 黑色文字
+  // 渲染文字表面
+  SDL_Surface *text_surface =
+      TTF_RenderText_Blended_Wrapped(font, node->text, color, w);
+  // 创建纹理
+  SDL_Texture *text_texture =
+      SDL_CreateTextureFromSurface(renderer, text_surface);
+  // 设置文字位置
+  SDL_Rect text_rect = {x, // x 坐标
+                        y, // y 坐标
+                        text_surface->w, text_surface->h};
+  // 绘制文字
+  SDL_RenderCopy(renderer, text_texture, NULL, &text_rect);
+
+  // 清理资源
+  SDL_DestroyTexture(text_texture);
+  SDL_FreeSurface(text_surface);
+}
+
 /*-------------------------------------
  * 渲染系统
  *-----------------------------------*/
-void render_tree(SDL_Renderer *renderer, TreeNode *dataNode, int parentX,
-                 int parentY) {
+void render_tree(TTF_Font *font, SDL_Renderer *renderer, TreeNode *dataNode,
+                 int parentX, int parentY) {
   if (!dataNode)
     return;
   YGNodeRef yogaNode = dataNode->yogaNode;
@@ -561,8 +615,16 @@ void render_tree(SDL_Renderer *renderer, TreeNode *dataNode, int parentX,
   int w = (int)YGNodeLayoutGetWidth(yogaNode);
   int h = (int)YGNodeLayoutGetHeight(yogaNode);
 
+  // 如果是 TEXT 节点，渲染文字
+  if (dataNode->node_type == TEXT && dataNode->text) {
+    render_text(font, renderer, dataNode, x, y, w, h);
+    return;
+  }
+
   // 绘制背景
   Color bg = dataNode->style->backgroundColor;
+  // 开启透明
+  SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
   SDL_SetRenderDrawColor(renderer, bg.r, bg.g, bg.b, bg.a);
   SDL_Rect rect = {x, y, w, h};
   SDL_RenderFillRect(renderer, &rect);
@@ -575,23 +637,49 @@ void render_tree(SDL_Renderer *renderer, TreeNode *dataNode, int parentX,
 
   // 递归渲染子节点
   for (int i = 0; i < dataNode->childCount; i++) {
-    render_tree(renderer, dataNode->children[i], x, y);
+    render_tree(font, renderer, dataNode->children[i], x, y);
   }
 }
 
 static JSValue js_createNode(JSContext *ctx, JSValue this_val, int argc,
                              JSValue *argv) {
-  // 参数解析（示例简化）
-  float64_t flex = 1.0f;
-  float64_t margin = 0.0f;
-  if (argc > 0)
-    JS_ToFloat64(ctx, &flex, argv[0]);
-  if (argc > 1)
-    JS_ToFloat64(ctx, &margin, argv[1]);
+  if (argc < 1) {
+    return JS_ThrowTypeError(ctx,
+                             "createNode requires at least 1 argument: type");
+  }
+  const char *type = JS_ToCString(ctx, argv[0]);
+  const char *text = NULL;
+
+  // 如果是 TEXT 类型，检查是否有第二个参数
+  if (strcmp(type, "TEXT") == 0) {
+    if (argc < 2) {
+      JS_FreeCString(ctx, type);
+      return JS_ThrowTypeError(
+          ctx, "TEXT node requires a second argument for text content");
+    }
+    text = JS_ToCString(ctx, argv[1]);
+  }
 
   // 创建 C 层对象
-  TreeNode *node =
-      create_node(flex, margin, YGFlexDirectionRow, YGJustifyFlexStart);
+  TreeNode *node;
+  if (strcmp(type, "TEXT") == 0) {
+    // 文字节点，设置边界为白色，留出 1px 边框方便展示
+    node = create_node(TEXT, text, 1.0f, 0, YGFlexDirectionRow,
+                       YGJustifyFlexStart);
+    node->style->borderColor = COLOR_WHITE;
+    node->style->backgroundColor = COLOR_TRANSPARENT;
+  } else if (strcmp(type, "NODE") == 0) {
+    node = create_node(NODE, NULL, 1.0f, 10.0f, YGFlexDirectionRow,
+                       YGJustifyFlexStart);
+  } else {
+    // 未知节点类型
+    JS_FreeCString(ctx, type);
+    JS_FreeCString(ctx, text);
+    return JS_ThrowTypeError(ctx, "Invalid node type. Use 'NODE' or 'TEXT'");
+  }
+
+  JS_FreeCString(ctx, type);
+  JS_FreeCString(ctx, text);
   if (!node)
     return JS_ThrowOutOfMemory(ctx);
 
@@ -775,6 +863,40 @@ static JSValue js_setAttribute(JSContext *ctx, JSValue this_val, int argc,
   }
 }
 
+static JSValue js_setTextContent(JSContext *ctx, JSValue this_val, int argc,
+                                 JSValue *argv) {
+  // 检查参数数量
+  if (argc != 2) {
+    return JS_ThrowTypeError(
+        ctx, "setTextContent requires exactly 2 arguments: node and text");
+  }
+
+  // 解包 TreeNode
+  TreeNode *node = unwrap_node(ctx, argv[0]);
+  if (!node) {
+    return JS_ThrowTypeError(ctx, "Invalid node parameter");
+  }
+
+  // 检查节点类型是否为 TEXT
+  if (node->node_type != TEXT) {
+    return JS_ThrowTypeError(ctx, "Node is not a TEXT node");
+  }
+
+  // 获取新的文字内容
+  const char *new_text = JS_ToCString(ctx, argv[1]);
+  if (!new_text) {
+    return JS_ThrowTypeError(ctx, "Invalid text parameter");
+  }
+
+  // 更新节点的文字内容
+  set_node_text(node, new_text);
+
+  // 释放 C 字符串资源
+  JS_FreeCString(ctx, new_text);
+
+  return JS_UNDEFINED;
+}
+
 /*-------------------------------------
  * 主程序
  *-----------------------------------*/
@@ -800,7 +922,8 @@ int main(int argc, char *argv[]) {
   }
 
   nodeIdMap = g_hash_table_new(g_int_hash, g_int_equal);
-  root_data = create_node(1.0f, 10.0f, YGFlexDirectionRow, YGJustifyFlexStart);
+  root_data = create_node(NODE, NULL, 1.0f, 10.0f, YGFlexDirectionRow,
+                          YGJustifyFlexStart);
   root_data->style->backgroundColor = parse_color("#F0F0F0"); // 根节点浅灰背景
   yogaRoot = root_data->yogaNode;
 
@@ -839,6 +962,9 @@ int main(int argc, char *argv[]) {
   JS_SetPropertyStr(ctx, global, "setAttribute",
                     JS_NewCFunction(ctx, js_setAttribute, "setAttribute", 3));
   JS_SetPropertyStr(
+      ctx, global, "setTextContent",
+      JS_NewCFunction(ctx, js_setTextContent, "setTextContent", 2));
+  JS_SetPropertyStr(
       ctx, global, "addEventListener",
       JS_NewCFunction(ctx, js_addEventListener, "addEventListener", 3));
   JS_SetPropertyStr(
@@ -867,6 +993,14 @@ int main(int argc, char *argv[]) {
   }
 
   SDL_Init(SDL_INIT_VIDEO);
+  TTF_Init();
+  TTF_Font *font = TTF_OpenFont("Arial.ttf", 24);
+  if (!font) {
+    SDL_Log("TTF_OpenFont failed: %s", TTF_GetError());
+    TTF_Quit();
+    SDL_Quit();
+    return 1;
+  }
   SDL_Window *window = SDL_CreateWindow(
       "树形布局编辑器 - A:添加 D:删除 I:插入 F:切换方向 1-3:颜色 R:重置 "
       "N:高亮下一节点 S:设置属性",
@@ -929,8 +1063,8 @@ int main(int argc, char *argv[]) {
         if (selectedNode) {
           switch (event.key.keysym.sym) {
           case SDLK_a: { // 添加子节点
-            TreeNode *child =
-                create_node(1.0f, 5.0f, YGFlexDirectionRow, YGJustifyFlexStart);
+            TreeNode *child = create_node(
+                NODE, NULL, 1.0f, 5.0f, YGFlexDirectionRow, YGJustifyFlexStart);
             append_child(selectedNode, child);
             break;
           }
@@ -945,8 +1079,9 @@ int main(int argc, char *argv[]) {
           }
           case SDLK_i: { // 插入节点
             if (selectedNode->parent) {
-              TreeNode *newNode = create_node(1.0f, 5.0f, YGFlexDirectionRow,
-                                              YGJustifyFlexStart);
+              TreeNode *newNode =
+                  create_node(NODE, NULL, 1.0f, 5.0f, YGFlexDirectionRow,
+                              YGJustifyFlexStart);
               insert_before(selectedNode->parent, newNode, selectedNode);
             }
             break;
@@ -994,7 +1129,7 @@ int main(int argc, char *argv[]) {
     update_yoga_layout(0);
     SDL_SetRenderDrawColor(renderer, 240, 240, 240, 255);
     SDL_RenderClear(renderer);
-    render_tree(renderer, root_data, 0, 0);
+    render_tree(font, renderer, root_data, 0, 0);
     SDL_RenderPresent(renderer);
     SDL_Delay(16);
   }
@@ -1003,8 +1138,10 @@ int main(int argc, char *argv[]) {
   free_tree(ctx, root_data);
   cleanup_resources(rt, ctx, loop, code, val);
   g_hash_table_destroy(nodeIdMap);
+  TTF_CloseFont(font);
   SDL_DestroyRenderer(renderer);
   SDL_DestroyWindow(window);
+  TTF_Quit();
   SDL_Quit();
   return 0;
 }

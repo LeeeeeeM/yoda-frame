@@ -5328,19 +5328,22 @@
   globalThis.console.warn = print;
   globalThis.console.error = print;
   const HOST_TAG = {
-    NODE: "Node",
-    TEXT: "Text"
+    NODE: "NODE",
+    TEXT: "TEXT"
   };
   const hostEnvironment = {
     // 必须实现的 DOM 操作方法
-    createNode: (type, text) => {
-      if (type === HOST_TAG.TEXT) {
-        console.warn(`暂时不支持文本节点, 内容为${text}`);
-      }
+    createNode: (type) => {
       if (type !== HOST_TAG.NODE) {
         console.warn(`暂时不支持${type}类型，使用${HOST_TAG.NODE}替代`);
       }
-      return createNode();
+      return createNode(HOST_TAG.NODE);
+    },
+    createTextNode: (text) => {
+      return createNode(HOST_TAG.TEXT, text);
+    },
+    setTextContent: (node, text) => {
+      setTextContent(node, text);
     },
     addEventListener: (node, eventName, callback) => {
       addEventListener(node, eventName, callback);
@@ -5368,9 +5371,6 @@
     now: Date.now,
     supportsMutation: true,
     isPrimaryRenderer: false,
-    // isHostComponent: (type) => {
-    //   return type === HOST_TAG.NODE;
-    // },
     // 节点创建
     createInstance: (type, props) => {
       const node = hostEnvironment.createNode(type);
@@ -5460,7 +5460,11 @@
     // 关闭不需要的功能
     shouldSetTextContent: () => false,
     createTextInstance: (text) => {
-      return hostEnvironment.createNode(HOST_TAG.TEXT, text);
+      return hostEnvironment.createTextNode(text);
+    },
+    commitTextUpdate: (textInstance, oldText, newText) => {
+      if (oldText === newText) return;
+      hostEnvironment.setTextContent(textInstance, newText);
     },
     supportsConcurrent: false,
     // 定时器系统
@@ -5484,19 +5488,33 @@
       unmount: () => reconciler.updateContainer(null, root, null)
     };
   };
+  const TEXT_MAP = {
+    LOCKED: "locked",
+    UNLOCKED: "unlocked"
+  };
+  const COLOR_MAP = {
+    RED: "#ff0000",
+    GREEN: "#00ff00",
+    BLUE: "#0000ff",
+    YELLOW: "#ffff00",
+    WHITE: "#ffffff"
+  };
   function App() {
     const [count, setCount] = reactExports.useState(0);
-    const [div1Color, setDiv1Color] = reactExports.useState("#ff0000");
-    const [div2Color, setDiv2Color] = reactExports.useState("#00ff00");
-    const div1Flex = reactExports.useMemo(() => {
-      return "#ff0000" === div1Color ? 1 : 2;
-    }, [div1Color]);
+    const [div1Color, setDiv1Color] = reactExports.useState(COLOR_MAP.RED);
+    const [div2Flex, setDiv2Flex] = reactExports.useState(1);
+    const [div3Flex, setDiv3Flex] = reactExports.useState(1);
+    const [text, setText] = reactExports.useState(TEXT_MAP.LOCKED);
     const openRef = reactExports.useRef(false);
+    const openColor = reactExports.useMemo(() => {
+      return text === TEXT_MAP.UNLOCKED ? COLOR_MAP.YELLOW : COLOR_MAP.WHITE;
+    }, [text]);
     const switchRef = reactExports.useCallback(() => {
       openRef.current = !openRef.current;
       console.log(
         `openRef.current is ${openRef.current}, 父级开关${openRef.current ? "打开" : "关闭"}`
       );
+      setText(openRef.current ? TEXT_MAP.UNLOCKED : TEXT_MAP.LOCKED);
     }, []);
     const handleClick1 = reactExports.useCallback(() => {
       if (!openRef.current) {
@@ -5504,40 +5522,97 @@
         return;
       }
       console.log("正在切换 div1 的颜色");
-      setDiv1Color(div1Color === "#0000ff" ? "#ff0000" : "#0000ff");
+      setDiv1Color(div1Color === COLOR_MAP.RED ? COLOR_MAP.BLUE : COLOR_MAP.RED);
     }, [div1Color]);
     const handleClick2 = reactExports.useCallback(() => {
       if (!openRef.current) {
         console.log("openRef.current is false, 请打开父级开关");
         return;
       }
-      console.log("正在切换 div2 的颜色");
-      setDiv2Color(div2Color === "#0000ff" ? "#00ff00" : "#0000ff");
-    }, [div2Color]);
+      console.log("正在切换 div2 的flex");
+      setDiv2Flex(div2Flex === 1 ? 2 : 1);
+    }, [div2Flex]);
+    const handleClick3 = reactExports.useCallback(() => {
+      if (!openRef.current) {
+        console.log("openRef.current is false, 请打开父级开关");
+        return;
+      }
+      console.log("正在切换 div3 的颜色");
+      setDiv3Flex(div3Flex === 1 ? 2 : 1);
+    }, [div3Flex]);
     reactExports.useEffect(() => {
-      setTimeout(() => {
-        setCount(count + 1);
+      const interval = setInterval(() => {
+        setCount((count2) => count2 + 1);
       }, 1e3);
-    }, [count]);
+      return () => clearInterval(interval);
+    }, []);
     return /* @__PURE__ */ jsxRuntimeExports.jsxs(jsxRuntimeExports.Fragment, { children: [
-      /* @__PURE__ */ jsxRuntimeExports.jsx(HOST_TAG.NODE, {}),
-      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { style: { flex: 2, margin: 5 }, onClick: switchRef, children: [
-        /* @__PURE__ */ jsxRuntimeExports.jsx(
-          "div",
-          {
-            style: { flex: div1Flex, margin: 15, backgroundColor: div1Color },
-            onClick: handleClick1
-          }
-        ),
-        /* @__PURE__ */ jsxRuntimeExports.jsx(
-          "div",
-          {
-            style: { flex: 1, margin: 15, backgroundColor: div2Color },
-            onClick: handleClick2
-          }
-        )
-      ] }),
-      count > 0 ? /* @__PURE__ */ jsxRuntimeExports.jsx("div", { children: "123123" }) : null
+      /* @__PURE__ */ jsxRuntimeExports.jsx(HOST_TAG.NODE, { style: { margin: 10 }, children: `HELLO WORLD!` }),
+      /* @__PURE__ */ jsxRuntimeExports.jsxs(
+        HOST_TAG.NODE,
+        {
+          style: { flex: 2, margin: 5, flexDirection: "column" },
+          children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsx(
+              HOST_TAG.NODE,
+              {
+                style: { flex: 1, margin: 5, backgroundColor: openColor },
+                onClick: switchRef,
+                children: `Click me to switch. It's ${text} now. Now U can ${openRef.current ? "" : "not"} click Nodes below.`
+              }
+            ),
+            /* @__PURE__ */ jsxRuntimeExports.jsxs(
+              HOST_TAG.NODE,
+              {
+                style: { flex: 3, margin: 5, flexDirection: "column" },
+                children: [
+                  /* @__PURE__ */ jsxRuntimeExports.jsx(
+                    HOST_TAG.NODE,
+                    {
+                      style: { margin: 15, backgroundColor: div1Color },
+                      onClick: handleClick1,
+                      children: `Div1 Current Color: ${div1Color}. Click me to change`
+                    }
+                  ),
+                  /* @__PURE__ */ jsxRuntimeExports.jsxs(HOST_TAG.NODE, { style: { margin: 5 }, children: [
+                    /* @__PURE__ */ jsxRuntimeExports.jsx(
+                      HOST_TAG.NODE,
+                      {
+                        style: {
+                          flex: div2Flex,
+                          margin: 5,
+                          backgroundColor: COLOR_MAP.GREEN
+                        },
+                        onClick: handleClick2,
+                        children: `Div2 Flex: 1. Click me to change`
+                      }
+                    ),
+                    /* @__PURE__ */ jsxRuntimeExports.jsx(
+                      HOST_TAG.NODE,
+                      {
+                        style: {
+                          flex: div3Flex,
+                          margin: 5,
+                          backgroundColor: COLOR_MAP.RED
+                        },
+                        onClick: handleClick3,
+                        children: `Div3 Flex: ${div3Flex}. Click me to change`
+                      }
+                    )
+                  ] })
+                ]
+              }
+            )
+          ]
+        }
+      ),
+      /* @__PURE__ */ jsxRuntimeExports.jsx(
+        HOST_TAG.NODE,
+        {
+          style: { flex: 1, margin: 5, flexDirection: "column" },
+          children: `Start: ${count} seconds`
+        }
+      )
     ] });
   }
   createRoot().render(

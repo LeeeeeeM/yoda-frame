@@ -80,7 +80,7 @@ find_library(GLIB_LIBRARY
   NO_DEFAULT_PATH
 )
 
-add_executable(main test.c)
+add_executable(main main.c)
 
 include_directories(
   ${YOGA_INCLUDE_DIR}
