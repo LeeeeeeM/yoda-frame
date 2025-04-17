@@ -5,13 +5,14 @@ const genColor = () => {
 
 setTimeout(() => {
   // 创建节点
-  const parent = createNode(1.0, 5.0);
-  const child1 = createNode(1.0, 5.0);
-  const child2 = createNode(1.0, 5.0);
+  const parent = createNode("NODE");
+  const child1 = createNode("NODE");
+  const child2 = createNode("NODE");
+  setAttribute(child2, "margin", 5);
 
   let a = () => {
     print("click this node -----------");
-  }
+  };
 
   // 添加子节点
   appendChild(parent, child1);
@@ -26,13 +27,13 @@ setTimeout(() => {
     // if (lastNode) {
     //   removeChild(parent, lastNode);
     // }
-    lastNode = createNode(1.0, 5.0);
+    lastNode = createNode("NODE");
     appendChild(parent, lastNode);
     addEventListener(lastNode, "click", a);
     // dispatchEvent(parent, "click");
     // removeEventListener(parent, "click", a);
     setAttribute(lastNode, "backgroundColor", genColor());
-  }, 5000);
+  }, 2000);
 }, 500);
 
 let a = setTimeout(() => {
