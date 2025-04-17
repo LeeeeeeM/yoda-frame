@@ -5584,7 +5584,7 @@
                           backgroundColor: COLOR_MAP.GREEN
                         },
                         onClick: handleClick2,
-                        children: `Div2 Flex: 1. Click me to change`
+                        children: `Div2 Flex: ${div2Flex}. Click me to change`
                       }
                     ),
                     /* @__PURE__ */ jsxRuntimeExports.jsx(
