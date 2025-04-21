@@ -643,42 +643,30 @@ void render_tree(TTF_Font *font, SDL_Renderer *renderer, TreeNode *dataNode,
 
 static JSValue js_createNode(JSContext *ctx, JSValue this_val, int argc,
                              JSValue *argv) {
+  // 创建 C 层对象
+  TreeNode *node = create_node(NODE, NULL, 1.0f, 10.0f, YGFlexDirectionRow,
+                               YGJustifyFlexStart);
+  if (!node)
+    return JS_ThrowOutOfMemory(ctx);
+
+  // 包装为 JS 对象
+  return wrap_node(ctx, node);
+}
+
+static JSValue js_createTextNode(JSContext *ctx, JSValue this_val, int argc,
+                                 JSValue *argv) {
   if (argc < 1) {
     return JS_ThrowTypeError(ctx,
-                             "createNode requires at least 1 argument: type");
+                             "createNode requires at least 1 argument: text");
   }
-  const char *type = JS_ToCString(ctx, argv[0]);
-  const char *text = NULL;
-
-  // 如果是 TEXT 类型，检查是否有第二个参数
-  if (strcmp(type, "TEXT") == 0) {
-    if (argc < 2) {
-      JS_FreeCString(ctx, type);
-      return JS_ThrowTypeError(
-          ctx, "TEXT node requires a second argument for text content");
-    }
-    text = JS_ToCString(ctx, argv[1]);
-  }
+  const char *text = JS_ToCString(ctx, argv[0]);
 
   // 创建 C 层对象
-  TreeNode *node;
-  if (strcmp(type, "TEXT") == 0) {
-    // 文字节点，设置边界为白色，留出 1px 边框方便展示
-    node = create_node(TEXT, text, 1.0f, 0, YGFlexDirectionRow,
-                       YGJustifyFlexStart);
-    node->style->borderColor = COLOR_WHITE;
-    node->style->backgroundColor = COLOR_TRANSPARENT;
-  } else if (strcmp(type, "NODE") == 0) {
-    node = create_node(NODE, NULL, 1.0f, 10.0f, YGFlexDirectionRow,
-                       YGJustifyFlexStart);
-  } else {
-    // 未知节点类型
-    JS_FreeCString(ctx, type);
-    JS_FreeCString(ctx, text);
-    return JS_ThrowTypeError(ctx, "Invalid node type. Use 'NODE' or 'TEXT'");
-  }
+  TreeNode *node =
+      create_node(TEXT, text, 1.0f, 0, YGFlexDirectionRow, YGJustifyFlexStart);
+  node->style->borderColor = COLOR_WHITE;
+  node->style->backgroundColor = COLOR_TRANSPARENT;
 
-  JS_FreeCString(ctx, type);
   JS_FreeCString(ctx, text);
   if (!node)
     return JS_ThrowOutOfMemory(ctx);
@@ -952,7 +940,7 @@ int main(int argc, char *argv[]) {
   // 注册全局函数
   JSValue global = JS_GetGlobalObject(ctx);
   JS_SetPropertyStr(ctx, global, "createNode",
-                    JS_NewCFunction(ctx, js_createNode, "createNode", 2));
+                    JS_NewCFunction(ctx, js_createNode, "createNode", 0));
   JS_SetPropertyStr(ctx, global, "appendChild",
                     JS_NewCFunction(ctx, js_appendChild, "appendChild", 2));
   JS_SetPropertyStr(ctx, global, "removeChild",
@@ -961,6 +949,9 @@ int main(int argc, char *argv[]) {
                     JS_NewCFunction(ctx, js_insertBefore, "insertBefore", 3));
   JS_SetPropertyStr(ctx, global, "setAttribute",
                     JS_NewCFunction(ctx, js_setAttribute, "setAttribute", 3));
+  JS_SetPropertyStr(
+      ctx, global, "createTextNode",
+      JS_NewCFunction(ctx, js_createTextNode, "createTextNode", 1));
   JS_SetPropertyStr(
       ctx, global, "setTextContent",
       JS_NewCFunction(ctx, js_setTextContent, "setTextContent", 2));
